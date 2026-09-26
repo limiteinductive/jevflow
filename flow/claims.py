@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import Field, create_model
 
-from flow import decide, feed, generator, reactions
+from flow import feed, generator, jev, reactions
 from text_processing import Sentence
 
 if TYPE_CHECKING:
@@ -73,7 +73,7 @@ async def correct(sentence: str) -> Correction | None:
             for name, template in ((f"true_{index}", "Is what '{draft}' states about the world true?"), (f"minimal_{index}", "Does '{draft}' keep the writer's sentence, changing only facts that were wrong?"))
         },
     )
-    check = await decide.run(CorrectionCheck, f"Sentence: {sentence}")
+    check = await jev.run(CorrectionCheck, f"Sentence: {sentence}")
     _, index = max((check[f"true_{index}"] * check[f"minimal_{index}"], index) for index in range(len(drafts)))
     accepted = min(check[f"true_{index}"], check[f"minimal_{index}"]) >= SWAP_THRESHOLD
     feed.act(check, "shown" if accepted else "dropped", f"true_{index}", f"minimal_{index}")

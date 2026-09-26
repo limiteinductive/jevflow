@@ -5,17 +5,16 @@ Every decision is one Jev request with all its questions in one payload.
 
 import asyncio
 import math
-from itertools import pairwise
 from dataclasses import dataclass, replace
+from itertools import pairwise
 from typing import Literal
 
-from pydantic import BaseModel, Field, create_model
-from pydantic_ai import Agent
+from pydantic import Field, create_model
 
-from flow import claims, components, feed, generator, reactions
+from flow import claims, components, feed, generator, memory, reactions
+from flow.jev import YesNo, run
 from text_processing import Sentence, split_sentences
 
-MODEL = "typesafe:jev-latest"
 MAX_NOTE_WORDS = 12
 NOTE_THRESHOLD = 0.6
 NOTE_GATE = 0.55
@@ -53,10 +52,8 @@ OPTION_FIT = 0.5
 """The options are shown only when Jev's P(one of them answers the question) reaches this; otherwise the question gets a one-line reply."""
 NOTE_CONTEXT = "A writer types their text and, in the same stream, notes to a writing assistant such as 'make this punchier', 'this is for engineers', 'im writing a blog post', 'replying to my boss about friday' or 'undo'."
 
-YesNo = Literal["yes", "no"]
-
-NoteField = Literal["new_page", "goal", "audience", "tone", "to_do", "undo", "question", "reply", "find", "open"]
-"""Header fields, plus "undo" (reverts the last edit), "question" (opens a comment thread on the previous sentence), "reply" (answers the open comment), and "find" and "open" (search the writer's other pages, and switch to the page found)."""
+NoteField = Literal["new_page", "goal", "audience", "tone", "to_do", "undo", "question", "reply", "find", "open", "forget"]
+"""Header fields, plus "undo" (reverts the last edit), "question" (opens a comment thread on the previous sentence), "reply" (answers the open comment), "find" and "open" (search the writer's other pages, and switch to the page found), and "forget" (asks memory to forget a fact)."""
 
 Scope = Literal["sentence", "paragraph"]
 
@@ -165,9 +162,6 @@ class Suggestion:
     measures: list[Measure]
 
 
-agent = Agent(MODEL)
-"""One agent for every decision: a fresh agent per call opens a new connection and adds about 0.4 s."""
-
 sentence_notes: dict[tuple[str, str, str, frozenset[str]], SentenceNote | None] = {}
 """Decisions by sentence text; the page asks about the whole draft on every pause, so each sentence is decided once."""
 
@@ -186,12 +180,6 @@ def line_sentences(text: str, breaks: list[int]) -> list[Sentence]:
         for chunk_start, chunk_end in pairwise(positions)
         for sentence in split_sentences(text[chunk_start:chunk_end])
     ]
-
-
-async def run(output_type: type[BaseModel], prompt: str) -> dict[str, float | str]:
-    """P(yes) for every yes/no field, and the chosen option for every other field; `feed.act` marks what the page does with them."""
-    _, answers = await feed.ask(agent, prompt, output_type)
-    return answers
 
 
 async def decide_note(sentence: str, comment: str, goal: str, enabled: frozenset[str]) -> SentenceNote | None:
@@ -219,6 +207,7 @@ async def decide_note(sentence: str, comment: str, goal: str, enabled: frozenset
         **new_piece,
         **components.fields(),
         **(reactions.fields(goal) if "reactions" in enabled else {}),
+        **(memory.fields(sentence) if "memory" in enabled else {}),
         **(claims.fields(goal) if "claims" in enabled else {}),
     )
     gate, (note, header), question, audience = await asyncio.gather(
@@ -231,6 +220,9 @@ async def decide_note(sentence: str, comment: str, goal: str, enabled: frozenset
         claims.record(sentence, goal, gate)
     if components.record(sentence, gate):
         return None
+    if "memory" in enabled and memory.record(sentence, gate):
+        feed.act(gate, "applied", "memory_forget")
+        return SentenceNote(sentence, gate["memory_forget"], "forget", [])
     if gate.get("reply", 0) >= NOTE_GATE:
         feed.act(gate, "applied", "reply")
         return SentenceNote(sentence, gate["reply"], "reply", [])
@@ -313,15 +305,21 @@ async def question_span(sentence: str, question: str) -> str | None:
     return span if span == sentence or check["whole_question"] >= NOTE_THRESHOLD else sentence
 
 
-async def timing(text: str) -> Timing:
-    """Whether now is a moment to show the writer anything unasked: every comment, popup and fix waits for it (the page's shortcut until a single per-pause decision motor exists)."""
+async def timing(text: str, goal: str, enabled: frozenset[str]) -> Timing:
+    """Whether now is a moment to show the writer anything unasked: every comment, popup and fix waits for it (the page's shortcut until a single per-pause decision motor exists).
+
+    Memory's recall questions for the facts whose aliases the draft or its `goal` mention ride in the same request.
+    """
+    found = memory.candidates(f"{goal}\n{text}") if "memory" in enabled else []
     Moment = create_model(
         "Moment",
         __doc__=f"A writer is typing a draft; the end of it so far is: '{text[-TIMING_CONTEXT_CHARS:]}'.",
         mid_thought=(YesNo, Field(description="Is the writer in the middle of a thought, likely to keep typing the same idea right now?")),
         interrupt=(YesNo, Field(description="Would a suggestion about what they already wrote be welcome now, rather than breaking their flow?")),
+        **memory.recall_fields(found, goal),
     )
     moment = await run(Moment, f"Draft end: {text[-TIMING_CONTEXT_CHARS:]}")
+    memory.recall(found, moment)
     feed.act(moment, "applied" if moment["mid_thought"] < MID_THOUGHT_GATE and moment["interrupt"] >= INTERRUPT_GATE else "silent", "mid_thought", "interrupt")
     return Timing(moment["mid_thought"], moment["interrupt"])
 
