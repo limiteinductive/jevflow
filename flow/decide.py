@@ -12,7 +12,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, create_model
 from pydantic_ai import Agent
 
-from flow import feed, generator, reactions
+from flow import components, feed, generator, reactions
 from text_processing import Sentence, split_sentences
 
 MODEL = "typesafe:jev-latest"
@@ -158,7 +158,7 @@ class Suggestion:
 agent = Agent(MODEL)
 """One agent for every decision: a fresh agent per call opens a new connection and adds about 0.4 s."""
 
-sentence_notes: dict[tuple[str, str, str], SentenceNote | None] = {}
+sentence_notes: dict[tuple[str, str, str, frozenset[str]], SentenceNote | None] = {}
 """Decisions by sentence text; the page asks about the whole draft on every pause, so each sentence is decided once."""
 
 sentence_fixes: dict[tuple[str, str], tuple[str | None, GoalSuggestion | None]] = {}
@@ -181,11 +181,12 @@ async def run(output_type: type[BaseModel], prompt: str) -> dict[str, float | st
     return answers
 
 
-async def decide_note(sentence: str, comment: str, goal: str) -> SentenceNote | None:
+async def decide_note(sentence: str, comment: str, goal: str, enabled: frozenset[str]) -> SentenceNote | None:
     """Jev gates the sentence while the LLM copies out the note words and writes the header (the local model is free, so it runs on every sentence); Jev then checks both.
 
     When the copied words fail the check, the sentence is a note only if Jev reads all of it as one; a header that fails is replaced by the note words.
     With a `goal`, a sentence Jev reads as starting something other than it is a `new_page` note: the whole sentence leaves, and its header is the new page's Goal.
+    A sentence that asks to turn a component on or off is recorded by `components` and is no note; reaction questions ride only when reactions are `enabled`.
     A goal or `new_page` note that Jev reads as also naming who the text is for files the audience the local model copied as a second header.
     """
     reply = {"reply": (YesNo, Field(description="Is the writer answering the coworker's comment (agreeing, disagreeing, correcting it or asking for the change) rather than writing the text?"))} if comment else {}
@@ -200,12 +201,16 @@ async def decide_note(sentence: str, comment: str, goal: str) -> SentenceNote | 
         for_whom=(YesNo, Field(description="Does the sentence also say who the text is for?")),
         **reply,
         **new_piece,
-        **reactions.fields(goal),
+        **components.fields(),
+        **(reactions.fields(goal) if "reactions" in enabled else {}),
     )
     gate, (note, header), question, audience = await asyncio.gather(
         run(NoteGate, f"Sentence: {sentence}"), generator.extract_note(sentence), generator.extract_question(sentence), generator.extract_audience(sentence)
     )
-    reactions.record(sentence, goal, gate)
+    if "reactions" in enabled:
+        reactions.record(sentence, goal, gate)
+    if components.record(sentence, gate):
+        return None
     if gate.get("reply", 0) >= NOTE_GATE:
         feed.act(gate, "applied", "reply")
         return SentenceNote(sentence, gate["reply"], "reply", [])
@@ -292,15 +297,15 @@ async def timing(text: str) -> Timing:
     return Timing(moment["mid_thought"], moment["interrupt"])
 
 
-async def find_notes(text: str, comment: str, breaks: list[int], goal: str) -> list[Note]:
+async def find_notes(text: str, comment: str, breaks: list[int], goal: str, enabled: frozenset[str]) -> list[Note]:
     """At most one note per sentence, located by character offsets in `text`; `comment` is the coworker's open comment and `goal` the Goal header, each possibly empty."""
     sentences = line_sentences(text, breaks)
-    fresh = list(dict.fromkeys(sentence.text.rstrip(".") for sentence in sentences if (sentence.text.rstrip("."), comment, goal) not in sentence_notes))
-    for sentence, decision in zip(fresh, await asyncio.gather(*(decide_note(sentence, comment, goal) for sentence in fresh))):
-        sentence_notes[sentence, comment, goal] = decision
+    fresh = list(dict.fromkeys(sentence.text.rstrip(".") for sentence in sentences if (sentence.text.rstrip("."), comment, goal, enabled) not in sentence_notes))
+    for sentence, decision in zip(fresh, await asyncio.gather(*(decide_note(sentence, comment, goal, enabled) for sentence in fresh))):
+        sentence_notes[sentence, comment, goal, enabled] = decision
     notes = []
     for sentence in sentences:
-        decision = sentence_notes[sentence.text.rstrip("."), comment, goal]
+        decision = sentence_notes[sentence.text.rstrip("."), comment, goal, enabled]
         if decision is None:
             continue
         start = text.find(decision.text, sentence.start)

@@ -13,7 +13,8 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from flow import decide, feed, gauges, memory, reactions
+from flow import components, decide, feed, gauges, memory, reactions
+from flow.components import ComponentName
 from mirror.model import Stacker
 from mirror.scan import scan
 
@@ -24,6 +25,7 @@ app = FastAPI()
 app.include_router(gauges.router)
 app.include_router(feed.router)
 app.include_router(memory.router)
+app.include_router(components.router)
 stacker = Stacker.load()
 
 
@@ -39,6 +41,8 @@ class CommentedDraft(BaseModel):
     """Offsets where a sentence must end even without punctuation: the end of the open thread's anchor."""
     goal: str
     """The Goal header, or empty; it conditions the reaction questions."""
+    disabled: list[ComponentName]
+    """The components the writer turned off."""
 
 
 class Question(BaseModel):
@@ -110,8 +114,15 @@ async def log_decisions(request: Request, call_next):
 
 @app.post("/notes")
 async def notes(draft: CommentedDraft) -> dict:
-    found, timing = await asyncio.gather(decide.find_notes(draft.text, draft.comment, draft.breaks, draft.goal), decide.timing(draft.text))
-    return {"notes": [asdict(note) for note in found], "timing": asdict(timing), "reactions": [asdict(reaction) for reaction in reactions.find(decide.line_sentences(draft.text, draft.breaks), draft.goal, found)]}
+    enabled = frozenset(components.COMPONENTS) - frozenset(draft.disabled)
+    found, timing = await asyncio.gather(decide.find_notes(draft.text, draft.comment, draft.breaks, draft.goal, enabled), decide.timing(draft.text))
+    sentences = decide.line_sentences(draft.text, draft.breaks)
+    return {
+        "notes": [asdict(note) for note in found],
+        "timing": asdict(timing),
+        "reactions": [asdict(reaction) for reaction in reactions.find(sentences, draft.goal, found)] if "reactions" in enabled else [],
+        "toggles": [asdict(toggle) for toggle in components.find(sentences)],
+    }
 
 
 @app.post("/answer")

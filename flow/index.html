@@ -550,6 +550,33 @@ function suggest(suggestions) {
   };
 }
 
+const DISABLED_KEY = "jevflow.disabled";
+let components = {};
+let disabled = new Set();
+try { disabled = new Set(JSON.parse(localStorage.getItem(DISABLED_KEY)) || []); } catch {}
+fetch("/components").then((response) => response.json()).then((registry) => {
+  components = registry;
+  window.dispatchEvent(new CustomEvent("components-loaded"));
+});
+
+function isOn(name) {
+  return !disabled.has(name);
+}
+
+function setComponent(name, on) {
+  if (on) disabled.delete(name);
+  else disabled.add(name);
+  try { localStorage.setItem(DISABLED_KEY, JSON.stringify([...disabled])); } catch {}
+  if (!on && name === "reactions") { for (const reaction of reactions) reaction.element?.remove(); reactions = []; }
+  if (!on && name === "flags") insights = [];
+  if (!on && name === "corrections") { pendingFixes = []; pendingSuggestions = []; }
+  if (!on && name === "gauges") { gauges = []; gaugesBox.innerHTML = ""; }
+  if (!on && name === "memory") renderMemory({ facts: [], recalled: [] });
+  if (on && name === "gauges") refreshGauges();
+  render();
+  window.dispatchEvent(new CustomEvent("component-toggle", { detail: { name, on } }));
+}
+
 const lastRequests = new Map();
 
 function post(path, body) {
@@ -661,11 +688,17 @@ async function findNotes() {
   const request = ++notesRequest;
   const comment = thread && thread.answer && !thread.reply ? thread.answer : "";
   const breaks = thread && stillThere(thread.anchor) ? [thread.anchor.end] : [];
-  const result = await post("/notes", { text, comment, breaks, goal: currentGoal() });
+  const result = await post("/notes", { text, comment, breaks, goal: currentGoal(), disabled: [...disabled] });
   if (request !== notesRequest || editor.value !== text) return;
   notes = result.notes;
   timing = result.timing;
   const limit = typingStart();
+  for (const toggle of result.toggles) {
+    if (toggle.end > limit || editor.value.slice(toggle.start, toggle.end) !== toggle.text) continue;
+    const [from, to] = removalRange(editor.value, toggle);
+    replaceAll(editor.value.slice(0, from) + editor.value.slice(to), from);
+    setComponent(toggle.component, toggle.on);
+  }
   for (const reaction of result.reactions) {
     if (reactions.length < MAX_REACTIONS && reaction.end <= limit && !reactions.some((other) => other.text === reaction.text)) reactions.push(reaction);
   }
@@ -679,6 +712,7 @@ async function findNotes() {
 }
 
 async function findFixes() {
+  if (!isOn("corrections")) return;
   const text = editor.value;
   const limit = typingStart();
   if (!text.slice(0, limit).trim()) return;
@@ -708,6 +742,7 @@ function applyPendingFixes() {
 }
 
 async function findInsights() {
+  if (!isOn("flags")) return;
   const text = editor.value;
   if (!text.trim()) return;
   const request = ++insightsRequest;
@@ -773,7 +808,7 @@ function setRing(element, probability, question) {
 }
 
 function renderGauges() {
-  if (!currentGoal()) { gaugesBox.innerHTML = ""; return; }
+  if (!currentGoal() || !isOn("gauges")) { gaugesBox.innerHTML = ""; return; }
   for (const gauge of gauges) {
     let element = gaugesBox.querySelector(`.gauge[data-name="${CSS.escape(gauge.name)}"]:not(.leaving)`);
     if (!element) {
@@ -815,6 +850,7 @@ function tweenValue(element, target) {
 }
 
 async function refreshGauges() {
+  if (!isOn("gauges")) return;
   const goal = currentGoal(), audience = latestHeader("audience"), tone = latestHeader("tone"), text = editor.value;
   const brief = [goal, audience, tone].join("\n");
   gaugeBrief = brief;
@@ -1092,6 +1128,7 @@ function renderMemory(memory) {
 }
 
 async function findMemory() {
+  if (!isOn("memory")) return;
   const text = editor.value;
   const request = ++memoryRequest;
   if (!text.trim()) return renderMemory({ facts: [], recalled: [] });
