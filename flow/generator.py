@@ -33,7 +33,8 @@ VOICE = (
     "Give the exact words to use, then at most a two word question that offers to make the change. "
     "Say plainly what you are not sure of and what you leave alone. A note the writer did not ask for starts with 'heads up:'. "
     "Match the writer's register: loose on a casual post, calm and warm on a personal note. "
-    "Use at most one emoji, usually none, and no dashes."
+    "Use at most one emoji, usually none, and no dashes. "
+    "Talk to the writer as 'you', never 'the writer' or 'the user'."
 )
 """The coworker's voice; every prompt whose output the writer reads as the coworker's words starts with it."""
 ANSWER_INSTRUCTIONS = VOICE + (
