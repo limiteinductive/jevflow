@@ -163,6 +163,9 @@
   #memory li { display: flex; align-items: center; gap: 8px; margin: 2px 0; }
   #memory .ring { flex: none; width: 12px; height: 12px; border-radius: 50%; background: conic-gradient(rgb(var(--thread)) calc(var(--relevance) * 1turn), var(--card-edge) 0); box-shadow: 0 0 calc(var(--relevance) * 8px) rgba(var(--thread), 0.7); }
   #memory .idle { background: var(--card-edge); box-shadow: none; }
+  #saved { position: fixed; bottom: 14px; left: 14px; width: 6px; height: 6px; border-radius: 50%; background: rgb(var(--applied)); opacity: 0; pointer-events: none; }
+  #saved.landed { animation: saved 1.2s ease-out; }
+  @keyframes saved { from { opacity: 0.9; } }
 </style>
 </head>
 <body>
@@ -179,6 +182,7 @@
   </div>
 </div>
 <button id="feed-toggle" tabindex="-1" title="Decisions (Cmd+J)" aria-label="Decisions"><svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="7" width="2.4" height="6" rx="1"/><rect x="5.8" y="2" width="2.4" height="11" rx="1"/><rect x="10.6" y="5" width="2.4" height="8" rx="1"/></svg></button>
+<i id="saved" aria-hidden="true"></i>
 <aside id="feed" aria-label="Decisions">
   <div class="feed-totals">
     <div><b><span id="feed-decisions">0</span><small id="feed-replays"></small></b>decisions</div>
@@ -277,6 +281,8 @@ function render() {
     const entries = headers.filter((header) => header.field === field).map((header) => escape(header.text));
     return entries.length ? `<div><b>${name}:</b>${entries.join("; ")}</div>` : "";
   }).join("");
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(savePage, SAVE_MS);
 }
 
 function renderThread(sheet) {
@@ -834,7 +840,52 @@ async function findMemory() {
   render();
 }
 
+const PAGES_KEY = "jevflow.pages", CURRENT_PAGE_KEY = "jevflow.currentPage", SAVE_MS = 500;
+const savedDot = document.getElementById("saved");
+let currentPage = Date.now().toString(36), saveTimer, lastSaved = "";
+
+function readPages() {
+  try { return JSON.parse(localStorage.getItem(PAGES_KEY)) || {}; } catch { return {}; }
+}
+
+function pageState() {
+  const kept = thread && thread.answer !== undefined ? thread : null;
+  return JSON.stringify({
+    text: editor.value, headers,
+    thread: kept && { anchor: kept.anchor, question: kept.question, answer: kept.answer, measures: kept.measures, reply: kept.reply, comment: kept.comment, replacement: kept.replacement, status: kept.status === "…" ? "" : kept.status },
+  });
+}
+
+function savePage() {
+  const state = pageState();
+  if (state === lastSaved) return;
+  const pages = readPages();
+  pages[currentPage] = { title: currentGoal() || editor.value.trim().split(/\s+/).slice(0, 6).join(" "), updatedAt: Date.now(), state: JSON.parse(state) };
+  try {
+    localStorage.setItem(PAGES_KEY, JSON.stringify(pages));
+    localStorage.setItem(CURRENT_PAGE_KEY, currentPage);
+  } catch { return; }
+  lastSaved = state;
+  savedDot.classList.remove("landed");
+  void savedDot.offsetWidth;
+  savedDot.classList.add("landed");
+}
+
+function restorePage() {
+  let stored = null;
+  try { stored = localStorage.getItem(CURRENT_PAGE_KEY); } catch {}
+  const page = stored && readPages()[stored];
+  if (stored) currentPage = stored;
+  if (!page) return;
+  editor.value = page.state.text;
+  headers = page.state.headers;
+  thread = page.state.thread;
+  lastSaved = pageState();
+  if (editor.value.trim()) editor.dispatchEvent(new Event("input"));
+}
+
 fetch("/memory").then((response) => response.json()).then(renderMemory);
+restorePage();
 render();
 </script>
 </body>
