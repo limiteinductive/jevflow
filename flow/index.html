@@ -814,10 +814,12 @@ function liftNotes() {
       continue;
     }
     if (note.field === "ideas") {
-      if (!isOn("ideas")) continue;
+      if (isOn("ideas")) requestIdeas();
+      const anchor = previousSentence(editor.value, note.start);
+      if (!(isOn("replies") && anchor.text)) { declined.add(`note ${note.text}`); continue; }
       const [start, end] = removalRange(editor.value, note);
       applyEdit(start, end, "", `note ${note.text}`);
-      requestIdeas();
+      openThread(anchor, note.text);
       continue;
     }
     if (note.field === "find" || note.field === "open") {
