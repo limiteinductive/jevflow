@@ -36,6 +36,8 @@ class CommentedDraft(BaseModel):
 
 class Question(BaseModel):
     sentence: str
+    paragraph: str
+    """The text from the start of the question's line or paragraph through `sentence`."""
     question: str
     goal: str
 
@@ -86,7 +88,7 @@ async def notes(draft: CommentedDraft) -> dict:
 
 @app.post("/answer")
 async def answer(question: Question) -> dict:
-    return asdict(await decide.answer(question.sentence, question.question, question.goal))
+    return asdict(await decide.answer(question.sentence, question.paragraph, question.question, question.goal))
 
 
 @app.post("/revise")

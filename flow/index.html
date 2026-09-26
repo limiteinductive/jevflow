@@ -184,8 +184,11 @@ async function openThread(anchor, question) {
   thread = { anchor, question };
   const goal = headers.find((header) => header.field === "goal");
   const opened = thread;
-  const result = await post("/answer", { sentence: anchor.text, question, goal: goal ? goal.text : "" });
+  const paragraphStart = editor.value.lastIndexOf("\n", anchor.start - 1) + 1;
+  const paragraph = { start: paragraphStart, end: anchor.end, text: editor.value.slice(paragraphStart, anchor.end) };
+  const result = await post("/answer", { sentence: anchor.text, paragraph: paragraph.text, question, goal: goal ? goal.text : "" });
   if (thread !== opened) return;
+  if (result.scope === "paragraph") thread.anchor = paragraph;
   thread.answer = result.text;
   thread.measures = result.measures;
   render();

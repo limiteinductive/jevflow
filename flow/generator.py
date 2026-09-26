@@ -27,13 +27,13 @@ FIX_EXAMPLES = [
     ("their going to love this feature, its so fast", "they're going to love this feature, it's so fast"),
 ]
 ANSWER_INSTRUCTIONS = (
-    "You are a sharp coworker reading a writer's draft over their shoulder. The writer asks you about the sentence they just wrote. "
+    "You are a sharp coworker reading a writer's draft over their shoulder. The writer asks you about what they just wrote: the last sentence, or the whole paragraph if the question is about it. "
     "Answer like a coworker in one or two short sentences: say what a reader of this kind of text might miss in that sentence, and give one concrete fix. "
     "Keep their joke."
 )
 ANSWER_EXAMPLES = [
     (
-        "Goal: a tweet\nSentence: turns out my cat was right about the vacuum all along\nQuestion: will people get this?",
+        "Goal: a tweet\nParagraph: turns out my cat was right about the vacuum all along\nLast sentence: turns out my cat was right about the vacuum all along\nQuestion: will people get this?",
         "People won't know what the cat's stance was. Add that she hid under the bed every time it ran.",
     )
 ]
@@ -92,9 +92,9 @@ async def fix(sentence: str) -> str:
     return await chat(FIX_INSTRUCTIONS, FIX_EXAMPLES, sentence, 2 * len(sentence.split()) + 16)
 
 
-async def answer(sentence: str, question: str, goal: str, seed: int) -> str:
+async def answer(sentence: str, paragraph: str, question: str, goal: str, seed: int) -> str:
     """One sampled draft; the server ignores `n`, so each draft is its own request with its own seed."""
-    return await chat(ANSWER_INSTRUCTIONS, ANSWER_EXAMPLES, f"Goal: {goal}\nSentence: {sentence}\nQuestion: {question}", 50, 0.9, seed)
+    return await chat(ANSWER_INSTRUCTIONS, ANSWER_EXAMPLES, f"Goal: {goal}\nParagraph: {paragraph}\nLast sentence: {sentence}\nQuestion: {question}", 60, 0.9, seed)
 
 
 async def revise(sentence: str, comment: str) -> str:

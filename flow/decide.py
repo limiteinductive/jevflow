@@ -30,6 +30,8 @@ YesNo = Literal["yes", "no"]
 NoteField = Literal["goal", "audience", "tone", "to_do", "undo", "question", "reply"]
 """Header fields, plus "undo" (reverts the last edit), "question" (opens a comment thread on the previous sentence) and "reply" (answers the open comment)."""
 
+Scope = Literal["sentence", "paragraph"]
+
 QuestionKind = Literal["understand", "opinion", "cut_or_keep", "true", "wording", "other"]
 
 HeaderField = Literal["goal", "audience", "tone", "to_do", "undo"]
@@ -75,6 +77,8 @@ class Answer:
     """The coworker's words, written by the local model."""
     measures: list[Measure]
     """Jev's probabilities behind the reply, shown beside the words."""
+    scope: "Scope"
+    """What the question is about; the page anchors the thread on the last sentence or the whole paragraph."""
 
 
 agent = Agent(MODEL)
@@ -219,7 +223,7 @@ async def find_fixes(text: str, limit: int) -> list[Fix]:
     ]
 
 
-async def answer(sentence: str, question: str, goal: str) -> Answer:
+async def answer(sentence: str, paragraph: str, question: str, goal: str) -> Answer:
     """The coworker's reply to the writer's `question` about `sentence`: the local model drafts `NUM_DRAFTS`, Jev ranks them on answering, being specific and keeping the voice.
 
     The top-ranked draft is shown unless every draft fails "answers the question"; then the drafts are resampled once.
@@ -229,19 +233,20 @@ async def answer(sentence: str, question: str, goal: str) -> Answer:
     Meta = create_model(
         "Meta",
         __doc__=f"A writer drafting a {goal or 'text'} asks a coworker a question about the sentence they just wrote.",
+        scope=(Scope, Field(description="Is the question about the last sentence, or about the whole paragraph (its length, pace or structure)?")),
         kind=(QuestionKind, Field(description="What is the writer asking? understand: will readers get it; opinion: what do you think; cut_or_keep: should it stay; true: is it accurate; wording: is there a better way to say it; other.")),
         reader_gets=(YesNo, Field(description=f"Would {reader} get what the sentence means?")),
     )
-    meta_task = asyncio.create_task(run(Meta, f"Sentence: {sentence}\n\nQuestion: {question}"))
+    meta_task = asyncio.create_task(run(Meta, f"Paragraph: {paragraph}\n\nLast sentence: {sentence}\n\nQuestion: {question}"))
     for attempt in range(2):
-        drafts = list(dict.fromkeys(await asyncio.gather(*(generator.answer(sentence, question, goal, NUM_DRAFTS * attempt + seed) for seed in range(NUM_DRAFTS)))))
+        drafts = list(dict.fromkeys(await asyncio.gather(*(generator.answer(sentence, paragraph, question, goal, NUM_DRAFTS * attempt + seed) for seed in range(NUM_DRAFTS)))))
         fields = {}
         for index, draft in enumerate(drafts):
             fields[f"answers_{index}"] = (YesNo, Field(description=f"Does '{draft}' answer the writer's question?"))
-            fields[f"specific_{index}"] = (YesNo, Field(description=f"Is '{draft}' specific to this sentence, not generic advice?"))
+            fields[f"specific_{index}"] = (YesNo, Field(description=f"Is '{draft}' specific to this draft, not generic advice?"))
             fields[f"voice_{index}"] = (YesNo, Field(description=f"Does '{draft}' keep the writer's voice and joke?"))
         Pick = create_model("Pick", __doc__=f"A writer drafting a {goal or 'text'} asks a coworker about the sentence they just wrote; the coworker drafted replies.", **fields)
-        check = await run(Pick, f"Sentence: {sentence}\n\nQuestion: {question}")
+        check = await run(Pick, f"Paragraph: {paragraph}\n\nLast sentence: {sentence}\n\nQuestion: {question}")
         ranked = sorted(((check[f"answers_{index}"] * check[f"specific_{index}"] * check[f"voice_{index}"], check[f"answers_{index}"], draft) for index, draft in enumerate(drafts)), reverse=True)
         if max(answers for _, answers, _ in ranked) >= ANSWER_FLOOR:
             break
@@ -249,7 +254,7 @@ async def answer(sentence: str, question: str, goal: str) -> Answer:
     measures = [Measure("answers your question", ranked[0][1])]
     if meta["kind"] == "understand":
         measures.insert(0, Measure("readers get it", meta["reader_gets"]))
-    return Answer(ranked[0][2], measures)
+    return Answer(ranked[0][2], measures, meta["scope"])
 
 
 async def revise(sentence: str, comment: str) -> str | None:
