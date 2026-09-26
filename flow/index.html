@@ -358,15 +358,8 @@ function openQuestions() {
     .sort((first, second) => second.probability - first.probability).slice(0, MAX_OPEN_QUESTIONS);
 }
 
-function relocate(item) {
-  if (stillThere(item)) return;
-  const start = editor.value.indexOf(item.text);
-  if (start >= 0) Object.assign(item, { start, end: start + item.text.length });
-}
-
 function render() {
   const text = editor.value;
-  if (thread) relocate(thread.anchor);
   const marks = [];
   if (thread && stillThere(thread.anchor)) marks.push({ start: thread.anchor.start, end: thread.anchor.end, open: '<span class="anchor" data-thread="1">' });
   if (judged && stillThere(judged)) marks.push({ start: judged.start, end: judged.end, open: '<span class="judged">' });
@@ -467,7 +460,6 @@ function characterRect(offset) {
 function renderReactions(sheet) {
   const text = editor.value;
   const caret = editor.selectionStart;
-  for (const reaction of reactions) relocate(reaction);
   for (const gone of reactions.filter((reaction) => !stillThere(reaction))) gone.element?.remove();
   reactions = reactions.filter(stillThere);
   for (const reaction of reactions) {
@@ -1037,7 +1029,7 @@ function renderProbes(sheet) {
   }).join("");
 }
 
-function trackProbes() {
+function trackRanges() {
   const before = previousValue, after = editor.value;
   previousValue = after;
   let prefix = 0;
@@ -1045,9 +1037,9 @@ function trackProbes() {
   let suffix = 0;
   while (suffix < before.length - prefix && before[before.length - 1 - suffix] === after[after.length - 1 - suffix]) suffix += 1;
   const removedEnd = before.length - suffix, shift = after.length - before.length;
-  for (const probe of probes) {
-    if (removedEnd <= probe.start) { probe.start += shift; probe.end += shift; }
-    else if (prefix <= probe.end) probe.end = Math.max(probe.start, probe.end + shift);
+  for (const range of [thread?.anchor, ...flashes, ...reactions, ...probes].filter(Boolean)) {
+    if (removedEnd <= range.start) { range.start += shift; range.end += shift; }
+    else if (prefix < range.end) range.end = Math.max(range.start, range.end + shift);
   }
   probes = probes.filter((probe) => probe.end > probe.start);
 }
@@ -1089,7 +1081,7 @@ document.addEventListener("click", (event) => {
 
 editor.addEventListener("input", () => {
   inputs += 1;
-  trackProbes();
+  trackRanges();
   timing = null;
   renderGauges();
   clearTimeout(notesTimer);
@@ -1187,7 +1179,8 @@ function loadPage(id, state) {
   savePage();
   for (const reaction of reactions) reaction.element?.remove();
   currentPage = id;
-  editor.value = state.text;
+  editor.value = previousValue = state.text;
+  probes = [];
   headers = state.headers;
   thread = state.thread;
   notes = []; insights = []; reactions = []; flashes = []; history = []; pendingFixes = []; pendingSuggestions = []; gauges = []; gaugeLimit = null;
@@ -1209,7 +1202,7 @@ function restorePage() {
   if (stored) currentPage = stored;
   renderPages(pages);
   if (!pages[stored]) return;
-  editor.value = pages[stored].state.text;
+  editor.value = previousValue = pages[stored].state.text;
   headers = pages[stored].state.headers;
   thread = pages[stored].state.thread;
   lastSaved = pageState();
