@@ -405,7 +405,7 @@ async function replyToThread(reply) {
   const result = await post("/revise", { sentence: thread.anchor.text, comment: thread.comment || thread.answer, reply, proposed: thread.replacement || "" });
   if (thread !== replied) return;
   if (!result.replacement || !stillThere(thread.anchor)) {
-    thread.status = "";
+    thread.status = "✋";
     thread.kept = true;
     render();
     setTimeout(() => { replied.kept = false; }, 400);
@@ -511,6 +511,12 @@ function liftNotes() {
       replaceAll(editor.value.slice(0, start) + editor.value.slice(end), start);
       undo();
       continue;
+    }
+    if (note.field === "new_page") {
+      const [start, end] = removalRange(editor.value, note);
+      replaceAll(editor.value.slice(0, start) + editor.value.slice(end), start);
+      openNewPage(note.header);
+      return;
     }
     const [start, end] = removalRange(editor.value, note);
     applyEdit(start, end, "", `note ${note.text}`);
@@ -905,7 +911,7 @@ function loadPage(id, state) {
   editor.value = state.text;
   headers = state.headers;
   thread = state.thread;
-  notes = []; insights = []; reactions = []; flashes = []; history = []; pendingFixes = []; pendingSuggestions = []; gauges = [];
+  notes = []; insights = []; reactions = []; flashes = []; history = []; pendingFixes = []; pendingSuggestions = []; gauges = []; gaugeLimit = null;
   declined.clear();
   lastSaved = "";
   savePage();

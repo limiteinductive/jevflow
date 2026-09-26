@@ -48,7 +48,7 @@ NOTE_CONTEXT = "A writer types their text and, in the same stream, notes to a wr
 
 YesNo = Literal["yes", "no"]
 
-NoteField = Literal["goal", "audience", "tone", "to_do", "undo", "question", "reply"]
+NoteField = Literal["new_page", "goal", "audience", "tone", "to_do", "undo", "question", "reply"]
 """Header fields, plus "undo" (reverts the last edit), "question" (opens a comment thread on the previous sentence) and "reply" (answers the open comment)."""
 
 Scope = Literal["sentence", "paragraph"]
@@ -160,8 +160,10 @@ async def decide_note(sentence: str, comment: str, goal: str) -> SentenceNote | 
     """Jev gates the sentence while the LLM copies out the note words and writes the header (the local model is free, so it runs on every sentence); Jev then checks both.
 
     When the copied words fail the check, the sentence is a note only if Jev reads all of it as one; a header that fails is replaced by the note words.
+    With a `goal`, a sentence Jev reads as starting something other than it is a `new_page` note: the whole sentence leaves, and its header is the new page's Goal.
     """
     reply = {"reply": (YesNo, Field(description="Is the writer answering the coworker's comment (agreeing, disagreeing, correcting it or asking for the change) rather than writing the text?"))} if comment else {}
+    new_piece = {"new_piece": (YesNo, Field(description=f"Does the writer say they are now writing something other than the {goal}?"))} if goal else {}
     NoteGate = create_model(
         "NoteGate",
         __doc__=NOTE_CONTEXT + (f" The writer's coworker just commented on the draft: '{comment}'" if comment else ""),
@@ -170,6 +172,7 @@ async def decide_note(sentence: str, comment: str, goal: str) -> SentenceNote | 
         is_question=(YesNo, Field(description="Is the sentence a question?")),
         field=(HeaderField, Field(description="What is the note about? goal: what the writer is writing; audience: who it is for; tone: how it should sound; to_do: something to add, check or change; undo: asks to undo the last edit.")),
         **reply,
+        **new_piece,
         **reactions.fields(goal),
     )
     gate, (note, header), question = await asyncio.gather(
@@ -180,12 +183,13 @@ async def decide_note(sentence: str, comment: str, goal: str) -> SentenceNote | 
         feed.act(gate, "applied", "reply")
         return SentenceNote(sentence, gate["reply"], "reply", "")
     asks = min(gate["asks"], gate["is_question"])
-    field = "question" if asks >= NOTE_GATE else gate["field"]
-    probability = max(gate["plan"], asks)
+    new_page = gate.get("new_piece", 0)
+    field = "question" if asks >= NOTE_GATE else "new_page" if new_page >= NOTE_GATE else gate["field"]
+    probability = max(gate["plan"], asks, new_page)
     if probability < NOTE_GATE:
         feed.act(gate, "silent", "plan", "asks")
         return None
-    feed.act(gate, "applied", "asks" if field == "question" else "plan", "field")
+    feed.act(gate, "applied", {"question": "asks", "new_page": "new_piece"}.get(field, "plan"), "field")
     if field == "undo":
         return SentenceNote(sentence, probability, "undo", "") if len(sentence.split()) <= MAX_NOTE_WORDS else None
     if field == "question":
@@ -204,6 +208,11 @@ async def decide_note(sentence: str, comment: str, goal: str) -> SentenceNote | 
         fair=(YesNo, Field(description="Is the header a fair short version of the note?")),
         adds=(YesNo, Field(description="Does the header add something the note does not say?")),
     )
+    if field == "new_page":
+        header_check = await run(HeaderCheck, f"Note: {note}\n\nHeader: {header}")
+        fair = min(header_check["fair"], 1 - header_check["adds"]) >= NOTE_THRESHOLD
+        feed.act(header_check, "applied" if fair else "dropped", "fair", "adds")
+        return SentenceNote(sentence, probability, field, header if fair else sentence)
     check, header_check = await asyncio.gather(run(NoteCheck, f"Sentence: {sentence}"), run(HeaderCheck, f"Note: {note}\n\nHeader: {header}"))
     if note not in sentence or min(check["only_note"], check["whole_note"]) < NOTE_THRESHOLD:
         if check["sentence_only_note"] < NOTE_THRESHOLD:
@@ -300,7 +309,7 @@ async def decide_fix(sentence: str, goal: str, categories: list[str]) -> tuple[s
         return None, None
     against = " and ".join(f"'{category}'" for _, category in hurt)
     comment = f"For {goal}, this sentence works against {against}."
-    rewrite = await revise(sentence, comment, "ok")
+    rewrite = await revise(sentence, comment, "ok", "", "")
     if rewrite is None or rewrite == sentence:
         feed.act(check, "dropped", *hurts)
         return None, None
