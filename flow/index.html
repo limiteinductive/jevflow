@@ -576,7 +576,7 @@ function previousSentence(text, position) {
 }
 
 function sentencesAfter(position) {
-  return (editor.value.slice(position, typingStart()).match(/[.!?\n]/g) || []).length;
+  return (editor.value.slice(position, typingStart()).replace(REF_SPAN, "").match(/[^.!?\n]*\S[^.!?\n]*[.!?\n]/g) || []).length;
 }
 
 const SEARCH_STOPWORDS = new Set("i me my mine we us our is it to of in on at a an the and did said say what where when who how about into from that this with have had was were you your yours for are can could would should there their them then than take bring open show find wrote write written page pages one some".split(" "));
