@@ -70,6 +70,8 @@ ids = itertools.count(1)
 pauses: dict[str, int] = {}
 decisions = 0
 """Jev questions answered since the server started, across every Jev request."""
+replays = 0
+"""Questions replayed from a cache since the server started; not in `decisions`."""
 input_tokens = 0
 began = time.perf_counter()
 router = APIRouter()
@@ -87,7 +89,7 @@ def record(prompt: str, schema: type[BaseModel], distributions: dict[str, dict[s
 
     `output` is None for a cache replay, which holds yes/no fields only.
     """
-    global decisions, input_tokens
+    global decisions, replays, input_tokens
     questions = [
         Question(
             name,
@@ -101,7 +103,10 @@ def record(prompt: str, schema: type[BaseModel], distributions: dict[str, dict[s
     current = origin.get(OFFLINE)
     answers = {question.name: question.answer for question in questions}
     records.append(Record(next(ids), next(versions), current.pause, current.endpoint, schema.__name__, questions, time.perf_counter() - began - seconds, seconds, tokens, prompt=prompt, cached=output is None, answers=answers))
-    decisions += 0 if output is None else len(questions)
+    if output is None:
+        replays += len(questions)
+    else:
+        decisions += len(questions)
     input_tokens += tokens
     return answers
 
@@ -131,6 +136,7 @@ async def feed(after: int = 0) -> dict:
         "version": max((kept.version for kept in records), default=after),
         "records": [{**asdict(kept), "answers": None} for kept in records if kept.version > after],
         "decisions": decisions,
+        "replays": replays,
         "median_seconds": statistics.median(latencies) if latencies else 0,
         "dollars": input_tokens * PRICE_PER_MILLION_INPUT_TOKENS / 1e6,
     }
