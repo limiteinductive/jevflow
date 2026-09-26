@@ -185,15 +185,15 @@ async def decide_note(sentence: str, comment: str, goal: str, enabled: frozenset
     """Jev gates the sentence while the LLM copies out the note words and writes the header (the local model is free, so it runs on every sentence); Jev then checks both.
 
     When the copied words fail the check, the sentence is a note only if Jev reads all of it as one; a header that fails is replaced by the note words.
-    With a `goal`, a sentence Jev reads as asking for a new page or starting something other than it is a `new_page` note: the whole sentence leaves, and its header, when it names the new piece, is the new page's Goal.
+    A sentence Jev reads as asking for a new page, or with a `goal` as starting something other than it, is a `new_page` note: the whole sentence leaves, and its header, when it names the new piece, is the new page's Goal.
     A sentence that asks to turn a component on or off is recorded by `components` and is no note; reaction questions ride only when reactions are `enabled`.
     A goal or `new_page` note that Jev reads as also naming who the text is for files the audience the local model copied as a second header.
     """
     reply = {"reply": (YesNo, Field(description="Is the writer answering the coworker's comment (agreeing, disagreeing, correcting it or asking for the change) rather than writing the text?"))} if comment else {}
     new_piece = {
-        "new_piece": (YesNo, Field(description=f"Does the writer ask for a new page, or say they are now writing something other than the {goal}?")),
+        "new_piece": (YesNo, Field(description="Does the writer ask for a new page" + (f", or say they are now writing something other than the {goal}" if goal else "") + "?")),
         "names_piece": (YesNo, Field(description="Does the sentence say what the writer will write next?")),
-    } if goal and "pages" in enabled else {}
+    } if "pages" in enabled else {}
     NoteGate = create_model(
         "NoteGate",
         __doc__=NOTE_CONTEXT + (f" The writer's coworker just commented on the draft: '{comment}'" if comment else ""),
