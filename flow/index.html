@@ -776,10 +776,11 @@ async function findNotes() {
   if (request !== notesRequest || editor.value !== text) return;
   notes = result.notes;
   timing = result.timing;
-  claims = result.claims.filter((claim) => claim.end <= typingStart());
   const limit = typingStart();
   pendingToggles = result.toggles;
   metaSpans = result.meta;
+  const content = contentText();
+  claims = result.claims.filter((claim) => claim.end <= limit && content.slice(claim.start, claim.end) === claim.text);
   for (const toggle of result.toggles) {
     if (toggle.end > limit || editor.value.slice(toggle.start, toggle.end) !== toggle.text) continue;
     const [from, to] = removalRange(editor.value, toggle);
