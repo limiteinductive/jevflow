@@ -901,8 +901,9 @@ async function findFixes() {
   const limit = typingStart();
   if (!text.slice(0, limit).trim()) return;
   const request = ++fixesRequest;
-  const result = await post("/fixes", { text: contentText(), limit, goal: currentGoal() });
+  const result = await post("/fixes", { text: contentText(), limit, goal: currentGoal() }).catch(() => null);
   if (request !== fixesRequest || editor.value !== text) return;
+  if (!result) { fixesTimer = setTimeout(findFixes, RETRY_MS); return; }
   const anchored = (fix) => thread && stillThere(thread.anchor) && fix.start < thread.anchor.end && thread.anchor.start < fix.end;
   const clear = result.fixes.filter((fix) => !declined.has(`fix ${fix.text} ${fix.replacement}`) && !anchored(fix) && !notes.some((note) => note.start < fix.end && fix.start < note.end));
   pendingFixes = clear;
