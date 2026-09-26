@@ -215,7 +215,7 @@ function replaceAll(text, caret) {
 
 function applyEdit(start, end, replacement, key) {
   const before = editor.value;
-  history.push({ text: before, headers: headers.slice(), key });
+  history.push({ key, headers: headers.slice(), start, inserted: replacement, removed: before.slice(start, end), context: before.slice(Math.max(0, start - 40), start) });
   const caret = editor.selectionStart;
   const shift = replacement.length - (end - start);
   replaceAll(before.slice(0, start) + replacement + before.slice(end), caret >= end ? caret + shift : caret);
@@ -226,7 +226,14 @@ function undo() {
   if (!previous) return;
   declined.add(previous.key);
   headers = previous.headers;
-  replaceAll(previous.text, previous.text.length);
+  const text = editor.value;
+  const found = text.indexOf(previous.context + previous.inserted, Math.max(0, previous.start - previous.context.length - 200));
+  const start = (found >= 0 ? found : text.indexOf(previous.context + previous.inserted)) + previous.context.length;
+  if (start < previous.context.length) return;
+  const end = start + previous.inserted.length;
+  const caret = editor.selectionStart;
+  const shift = previous.removed.length - previous.inserted.length;
+  replaceAll(text.slice(0, start) + previous.removed + text.slice(end), caret >= end ? caret + shift : caret);
 }
 
 function removalRange(text, note) {
