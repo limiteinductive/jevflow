@@ -18,7 +18,8 @@ from mirror.model import Stacker
 from mirror.scan import scan
 
 PORT = 8000
-INSIGHT_THRESHOLD = 0.5
+INSIGHT_THRESHOLD = 0.85
+"""Plain concrete and fiction sentences score 0.59 to 0.82 and template-email lines 0.93 to 1.0."""
 
 app = FastAPI()
 app.include_router(gauges.router)
