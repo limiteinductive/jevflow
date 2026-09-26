@@ -3,6 +3,7 @@
 Run: `uv run python -m flow.app`, then open http://127.0.0.1:8000
 """
 
+import asyncio
 import time
 from dataclasses import asdict
 from pathlib import Path
@@ -86,7 +87,8 @@ async def log_decisions(request: Request, call_next):
 
 @app.post("/notes")
 async def notes(draft: CommentedDraft) -> dict:
-    return {"notes": [asdict(note) for note in await decide.find_notes(draft.text, draft.comment, draft.breaks)]}
+    found, timing = await asyncio.gather(decide.find_notes(draft.text, draft.comment, draft.breaks), decide.timing(draft.text))
+    return {"notes": [asdict(note) for note in found], "timing": asdict(timing)}
 
 
 @app.post("/answer")

@@ -21,6 +21,7 @@ NOTE_GATE = 0.55
 """A sentence holds a note when the plan question reaches this; hand-made notes score 0.89 to 0.98 and prose sentences at most 0.21."""
 OWN_DRAFT_GATE = 0.3
 """A question lifts only when "about their own draft?" reaches this: questions to the recipient ('want me to grab pad thai') score 0.00 to 0.04, and the demo's run-on 'wdyt?' 0.43 to 0.49."""
+TIMING_CONTEXT_CHARS = 400
 NUM_DRAFTS = 3
 ANSWER_FLOOR = 0.3
 """Below this on "answers the writer's question?" for every draft, the drafts are resampled once."""
@@ -82,6 +83,13 @@ class Answer:
     """Jev's probabilities behind the reply, shown beside the words."""
     scope: "Scope"
     """What the question is about; the page anchors the thread on the last sentence or the whole paragraph."""
+
+
+@dataclass(frozen=True)
+class Timing:
+    mid_thought: float
+    interrupt: float
+    """P(a suggestion about the finished text is welcome now)."""
 
 
 agent = Agent(MODEL)
@@ -187,6 +195,18 @@ async def question_span(sentence: str, question: str) -> str | None:
     if check["about_own_draft"] < OWN_DRAFT_GATE:
         return None
     return span if span == sentence or check["whole_question"] >= NOTE_THRESHOLD else sentence
+
+
+async def timing(text: str) -> Timing:
+    """Whether now is a moment to show the writer anything unasked: every comment, popup and fix waits for it (the page's shortcut until a single per-pause decision motor exists)."""
+    Moment = create_model(
+        "Moment",
+        __doc__=f"A writer is typing a draft; the end of it so far is: '{text[-TIMING_CONTEXT_CHARS:]}'.",
+        mid_thought=(YesNo, Field(description="Is the writer in the middle of a thought, likely to keep typing the same idea right now?")),
+        interrupt=(YesNo, Field(description="Would a suggestion about what they already wrote be welcome now, rather than breaking their flow?")),
+    )
+    moment = await run(Moment, f"Draft end: {text[-TIMING_CONTEXT_CHARS:]}")
+    return Timing(moment["mid_thought"], moment["interrupt"])
 
 
 async def find_notes(text: str, comment: str, breaks: list[int]) -> list[Note]:

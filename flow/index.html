@@ -80,6 +80,8 @@ const THREAD_FADE_SENTENCES = 2;
 let thread = null;
 let notes = [], insights = [], headers = [], history = [], flashes = [];
 const declined = new Set();
+let timing = null, pendingFixes = [];
+const settled = () => timing !== null && timing.mid_thought < 0.5 && timing.interrupt >= 0.3;
 let gaugesTimer, notesTimer, insightsTimer, fixesTimer, notesRequest = 0, insightsRequest = 0, fixesRequest = 0;
 
 const escape = (text) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -95,6 +97,7 @@ function stillThere(item) {
 }
 
 function openQuestions() {
+  if (!settled()) return [];
   const limit = typingStart();
   return insights.filter((insight) => insight.ask && insight.end <= limit && stillThere(insight))
     .sort((first, second) => second.probability - first.probability).slice(0, MAX_OPEN_QUESTIONS);
@@ -312,6 +315,8 @@ async function findNotes() {
   const result = await post("/notes", { text, comment, breaks });
   if (request !== notesRequest || editor.value !== text) return;
   notes = result.notes;
+  timing = result.timing;
+  applyPendingFixes();
   liftNotes();
   render();
   if (currentGoal() !== gaugeGoal) refreshGauges();
@@ -327,7 +332,15 @@ async function findFixes() {
   if (request !== fixesRequest || editor.value !== text) return;
   const anchored = (fix) => thread && stillThere(thread.anchor) && fix.start < thread.anchor.end && thread.anchor.start < fix.end;
   const clear = result.fixes.filter((fix) => !declined.has(`fix ${fix.text} ${fix.replacement}`) && !anchored(fix) && !notes.some((note) => note.start < fix.end && fix.start < note.end));
-  for (const fix of clear.sort((first, second) => second.start - first.start)) {
+  pendingFixes = clear;
+  applyPendingFixes();
+}
+
+function applyPendingFixes() {
+  if (!settled()) return;
+  const ready = pendingFixes.filter((fix) => editor.value.slice(fix.start, fix.end) === fix.text);
+  pendingFixes = [];
+  for (const fix of ready.sort((first, second) => second.start - first.start)) {
     applyEdit(fix.start, fix.end, fix.replacement, `fix ${fix.text} ${fix.replacement}`);
     const flash = { start: fix.start, end: fix.start + fix.replacement.length, text: fix.replacement };
     flashes.push(flash);
@@ -417,6 +430,7 @@ async function refreshGauges() {
 }
 
 editor.addEventListener("input", () => {
+  timing = null;
   renderGauges();
   clearTimeout(notesTimer);
   clearTimeout(insightsTimer);
