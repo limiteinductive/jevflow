@@ -48,13 +48,13 @@ async def title(page: Page) -> dict[str, str | None]:
     check = await decide.run(TitleCheck, f"Text: {page.text}")
     weakest = min(("describes", "distinct"), key=check.get)
     if check[weakest] >= TITLE_GATE:
-        feed.act(check, "silent", weakest)
+        feed.act(check, "silent", weakest, component="titles")
         return {"title": None}
     reply = await generator.chat(TITLE_INSTRUCTIONS, TITLE_EXAMPLES, f"Other titles: {others}\n\nText: {page.text}", 40)
     taken = {page.title, *page.others}
     options = [option for option in dict.fromkeys(line.strip(" -*•.").lower() for line in reply.splitlines()) if option and option not in taken][:NUM_TITLES]
     if not options:
-        feed.act(check, "dropped", weakest)
+        feed.act(check, "dropped", weakest, component="titles")
         return {"title": None}
     TitlePick = create_model(
         "TitlePick",
@@ -62,6 +62,6 @@ async def title(page: Page) -> dict[str, str | None]:
         pick=(Literal[tuple(options)], Field(description="Which title best says what this page is about and tells it apart from the other pages?")),
     )
     pick = await decide.run(TitlePick, f"Text: {page.text}")
-    feed.act(check, "applied", weakest)
-    feed.act(pick, "applied", "pick")
+    feed.act(check, "applied", weakest, component="titles")
+    feed.act(pick, "applied", "pick", component="titles")
     return {"title": pick["pick"]}
