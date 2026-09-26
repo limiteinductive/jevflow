@@ -163,7 +163,24 @@
   #memory li { display: flex; align-items: center; gap: 8px; margin: 2px 0; }
   #memory .ring { flex: none; width: 12px; height: 12px; border-radius: 50%; background: conic-gradient(rgb(var(--thread)) calc(var(--relevance) * 1turn), var(--card-edge) 0); box-shadow: 0 0 calc(var(--relevance) * 8px) rgba(var(--thread), 0.7); }
   #memory .idle { background: var(--card-edge); box-shadow: none; }
-  #saved { position: fixed; bottom: 14px; left: 14px; width: 6px; height: 6px; border-radius: 50%; background: rgb(var(--applied)); opacity: 0; pointer-events: none; }
+  #pages-toggle {
+    position: fixed; top: 14px; left: 14px; z-index: 6; width: 30px; height: 30px; padding: 0; display: grid; place-items: center; cursor: pointer;
+    border-radius: 8px; border: 1px solid var(--card-edge); background: var(--card-bg); color: var(--faint); font: 15px/1 -apple-system, sans-serif;
+  }
+  #pages-toggle:hover, body.pages-open #pages-toggle { color: var(--ink); }
+  #pages {
+    position: fixed; top: 0; left: 0; bottom: 0; width: 212px; z-index: 5; box-sizing: border-box; padding: 56px 10px 16px; overflow-y: auto; border-right: 1px solid var(--card-edge);
+    background: var(--feed-bg); backdrop-filter: blur(18px) saturate(1.4); -webkit-backdrop-filter: blur(18px) saturate(1.4); font: 12.5px/1.35 -apple-system, "Helvetica Neue", sans-serif;
+    transform: translateX(-100%); transition: transform 0.35s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  body.pages-open #pages { transform: none; }
+  #new-page { display: block; width: 100%; margin-bottom: 8px; padding: 4px 8px; border: 0; border-bottom: 1px solid var(--card-edge); background: none; color: var(--faint); font: 18px/1 -apple-system, sans-serif; text-align: left; cursor: pointer; }
+  #new-page:hover { color: var(--ink); }
+  #page-list { margin: 0; padding: 0; list-style: none; }
+  #page-list li { padding: 5px 8px; border-radius: 5px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+  #page-list li:hover { color: var(--ink); }
+  #page-list li.current { color: var(--ink); background: var(--track); }
+  #saved { position: fixed; z-index: 7; bottom: 14px; left: 14px; width: 6px; height: 6px; border-radius: 50%; background: rgb(var(--applied)); opacity: 0; pointer-events: none; }
   #saved.landed { animation: saved 1.2s ease-out; }
   @keyframes saved { from { opacity: 0.9; } }
 </style>
@@ -183,6 +200,8 @@
 </div>
 <button id="feed-toggle" tabindex="-1" title="Decisions (Cmd+J)" aria-label="Decisions"><svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="7" width="2.4" height="6" rx="1"/><rect x="5.8" y="2" width="2.4" height="11" rx="1"/><rect x="10.6" y="5" width="2.4" height="8" rx="1"/></svg></button>
 <i id="saved" aria-hidden="true"></i>
+<button id="pages-toggle" tabindex="-1" title="Pages" aria-label="Pages">≡</button>
+<nav id="pages" aria-label="Pages"><button id="new-page" tabindex="-1" title="New page" aria-label="New page">+</button><ul id="page-list"></ul></nav>
 <aside id="feed" aria-label="Decisions">
   <div class="feed-totals">
     <div><b><span id="feed-decisions">0</span><small id="feed-replays"></small></b>decisions</div>
@@ -842,6 +861,7 @@ async function findMemory() {
 
 const PAGES_KEY = "jevflow.pages", CURRENT_PAGE_KEY = "jevflow.currentPage", SAVE_MS = 500;
 const savedDot = document.getElementById("saved");
+const pageList = document.getElementById("page-list");
 let currentPage = Date.now().toString(36), saveTimer, lastSaved = "";
 
 function readPages() {
@@ -860,7 +880,7 @@ function savePage() {
   const state = pageState();
   if (state === lastSaved) return;
   const pages = readPages();
-  pages[currentPage] = { title: currentGoal() || editor.value.trim().split(/\s+/).slice(0, 6).join(" "), updatedAt: Date.now(), state: JSON.parse(state) };
+  pages[currentPage] = { title: currentGoal() || editor.value.trim().split(/\s+/).slice(0, 6).join(" ") || "New page", updatedAt: Date.now(), state: JSON.parse(state) };
   try {
     localStorage.setItem(PAGES_KEY, JSON.stringify(pages));
     localStorage.setItem(CURRENT_PAGE_KEY, currentPage);
@@ -869,20 +889,56 @@ function savePage() {
   savedDot.classList.remove("landed");
   void savedDot.offsetWidth;
   savedDot.classList.add("landed");
+  renderPages(pages);
+}
+
+function renderPages(pages) {
+  pageList.innerHTML = Object.entries(pages).sort(([, first], [, second]) => second.updatedAt - first.updatedAt)
+    .map(([id, page]) => `<li data-page="${attribute(id)}" class="${id === currentPage ? "current" : ""}" title="${attribute(page.title)}">${escape(page.title)}</li>`).join("");
+}
+
+function loadPage(id, state) {
+  clearTimeout(saveTimer);
+  savePage();
+  for (const reaction of reactions) reaction.element?.remove();
+  currentPage = id;
+  editor.value = state.text;
+  headers = state.headers;
+  thread = state.thread;
+  notes = []; insights = []; reactions = []; flashes = []; history = []; pendingFixes = []; pendingSuggestions = []; gauges = [];
+  declined.clear();
+  lastSaved = "";
+  savePage();
+  editor.dispatchEvent(new Event("input"));
+  editor.focus();
+}
+
+function openNewPage(seedText) {
+  loadPage(Date.now().toString(36), { text: "", headers: seedText ? [{ field: "goal", text: seedText.trim() }] : [], thread: null });
 }
 
 function restorePage() {
   let stored = null;
   try { stored = localStorage.getItem(CURRENT_PAGE_KEY); } catch {}
-  const page = stored && readPages()[stored];
+  const pages = readPages();
   if (stored) currentPage = stored;
-  if (!page) return;
-  editor.value = page.state.text;
-  headers = page.state.headers;
-  thread = page.state.thread;
+  renderPages(pages);
+  if (!pages[stored]) return;
+  editor.value = pages[stored].state.text;
+  headers = pages[stored].state.headers;
+  thread = pages[stored].state.thread;
   lastSaved = pageState();
   if (editor.value.trim()) editor.dispatchEvent(new Event("input"));
 }
+
+pageList.addEventListener("click", (event) => {
+  const id = event.target.closest("[data-page]")?.dataset.page;
+  const page = id && id !== currentPage && readPages()[id];
+  if (page) loadPage(id, page.state);
+});
+document.getElementById("new-page").addEventListener("click", () => openNewPage(""));
+document.getElementById("pages-toggle").addEventListener("click", () => { document.body.classList.toggle("pages-open"); setTimeout(render, 360); });
+if (window.innerWidth > 1100) document.body.classList.add("pages-open");
 
 fetch("/memory").then((response) => response.json()).then(renderMemory);
 restorePage();
