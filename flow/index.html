@@ -376,6 +376,9 @@ const GAUGE_FADE_MS = 500;
 const DELTA_MS = 2500;
 let gauges = [], gaugeLimit = null, gaugeBrief = "", gaugesRequest = 0, gaugeSeconds = null;
 const gaugeTimings = [];
+const X_URL_LENGTH = 23;
+const X_LIGHT_RANGES = [[0, 4351], [8192, 8205], [8208, 8223], [8242, 8247]];
+const graphemes = new Intl.Segmenter();
 
 function latestHeader(field) {
   const entries = headers.filter((header) => header.field === field);
@@ -441,10 +444,22 @@ function renderGauges() {
   if (gaugeLimit && !count) { count = document.createElement("div"); count.className = "count"; gaugesBox.appendChild(count); }
   if (!gaugeLimit && count) count.remove();
   if (gaugeLimit) {
-    const length = editor.value.trim().length;
+    const length = xLength(editor.value.trim());
     count.textContent = `${length} / ${gaugeLimit}`;
     count.style.color = length > gaugeLimit ? "rgb(200, 70, 60)" : "";
   }
+}
+
+function xLength(text) {
+  let length = 0;
+  for (const piece of text.split(/(https?:\/\/\S+)/)) {
+    if (/^https?:\/\//.test(piece)) { length += X_URL_LENGTH; continue; }
+    for (const { segment } of graphemes.segment(piece)) {
+      const code = segment.codePointAt(0);
+      length += X_LIGHT_RANGES.some(([low, high]) => code >= low && code <= high) && segment.length === 1 ? 1 : 2;
+    }
+  }
+  return length;
 }
 
 function tweenValue(element, target) {
@@ -464,10 +479,10 @@ async function refreshGauges() {
   const goal = currentGoal(), audience = latestHeader("audience"), tone = latestHeader("tone"), text = editor.value;
   const brief = [goal, audience, tone].join("\n");
   gaugeBrief = brief;
-  if (!goal || !text.trim()) { renderGauges(); return; }
   const request = ++gaugesRequest, began = performance.now();
+  if (!goal || !text.trim()) { gauges = []; renderGauges(); return; }
   const result = await post("/gauges", { text, goal, audience, tone });
-  if (request !== gaugesRequest || gaugeBrief !== brief) return;
+  if (request !== gaugesRequest || gaugeBrief !== brief || editor.value !== text) return;
   gaugeTimings.push((performance.now() - began) / 1000);
   gaugeSeconds = result.seconds;
   gauges = result.gauges;
