@@ -46,12 +46,16 @@ def record(sentence: str, goal: str, gate: dict[str, float | str]) -> None:
     sentence_reactions[sentence, goal] = (EMOJIS[name], gate[name]) if gate[name] >= REACTION_THRESHOLD else None
 
 
+def unnoted(sentences: list[Sentence], notes: list["Note"]) -> list[Sentence]:
+    """The sentences that hold no note."""
+    return [sentence for sentence in sentences if not any(note.start < sentence.start + len(sentence.text) and sentence.start < note.end for note in notes)]
+
+
 def find(sentences: list[Sentence], goal: str, notes: list["Note"]) -> list[Reaction]:
     """The reactions in the draft, skipping every sentence that holds a note."""
     reactions = []
-    for sentence in sentences:
+    for sentence in unnoted(sentences, notes):
         reaction = sentence_reactions.get((sentence.text.rstrip("."), goal))
-        end = sentence.start + len(sentence.text)
-        if reaction and not any(note.start < end and sentence.start < note.end for note in notes):
-            reactions.append(Reaction(sentence.start, end, sentence.text, *reaction))
+        if reaction:
+            reactions.append(Reaction(sentence.start, sentence.start + len(sentence.text), sentence.text, *reaction))
     return reactions
