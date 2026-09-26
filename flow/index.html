@@ -329,7 +329,7 @@
     <div id="comments" data-ref="component:replies" data-ref-data="the margin comment: the coworker's reply to your question"></div>
     <div id="reactions" data-ref="component:reactions" data-ref-data="the emoji reactions beside lines that land"></div>
     <div id="probes" data-ref="component:probes" data-ref-data="the rings answering your yes/no questions about copied text"></div>
-    <div id="claims"></div>
+    <div id="claims" data-ref="component:claims" data-ref-data="the rings on claims that read as false, with a one-click fix"></div>
   </div>
 </div>
 <button id="feed-toggle" tabindex="-1" title="Decisions (Cmd+J)" aria-label="Decisions"><svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="7" width="2.4" height="6"/><rect x="5.8" y="2" width="2.4" height="11"/><rect x="10.6" y="5" width="2.4" height="8"/></svg></button>
@@ -1218,7 +1218,7 @@ editor.addEventListener("copy", (event) => {
 
 document.addEventListener("click", (event) => {
   const element = event.target.closest("[data-ref]");
-  if (!element) return;
+  if (!element || event.target.closest("button")) return;
   const token = refToken(element);
   const data = Object.entries(element.dataset).filter(([key]) => key !== "ref").map(([key, value]) => `${key}: ${value}`);
   snapshots.set(token, { ref: element.dataset.ref, component: [...data, element.innerText.replace(/\s+/g, " ").trim()].join("; ") });
