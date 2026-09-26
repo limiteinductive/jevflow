@@ -27,12 +27,13 @@
   #backdrop { position: absolute; inset: 0; pointer-events: none; color: var(--ink); }
   #editor { position: relative; background: transparent; color: transparent; caret-color: var(--ink); outline: none; resize: none; min-height: 60vh; overflow: hidden; display: block; }
   #editor::placeholder { color: var(--faint); }
-  .note { color: var(--note); background: var(--note-bg); border-radius: 3px; }
   .flag { border-radius: 3px; }
   .fixed { border-radius: 3px; background: rgba(var(--fix), 0.3); }
   #asks { position: absolute; inset: 0; pointer-events: none; }
   .anchor { border-bottom: 2px solid rgba(var(--thread), 0.7); background: rgba(var(--thread), 0.08); }
   #comments { position: absolute; top: 0; left: calc(100% + 28px); width: 16rem; }
+  #comments.below { left: 0; width: 100%; z-index: 2; }
+  .page-link { cursor: pointer; color: rgb(var(--thread)); border-bottom: 1px solid rgba(var(--thread), 0.4); }
   .card {
     position: absolute; left: 0; right: 0; background: var(--card-bg); border: 1px solid var(--card-edge); border-left: 3px solid rgb(var(--thread));
     border-radius: 8px; padding: 8px 10px; font: 13px/1.4 -apple-system, "Helvetica Neue", sans-serif; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08); transition: opacity 0.6s;
@@ -82,10 +83,17 @@
   .probe svg { width: 22px; height: 22px; transform: rotate(-90deg); }
   .probe .track { stroke: var(--card-edge); }
   .probe .level { transition: stroke-dashoffset 0.9s ease, stroke 0.9s ease; }
+  .claimed { text-decoration: underline dotted rgb(var(--style)); text-decoration-thickness: 2px; text-underline-offset: 4px; }
+  #claims { position: absolute; top: 0; left: calc(100% + 28px); }
+  .claim { position: absolute; display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+  .claim .swap { font: 500 12px/1.3 var(--sans, sans-serif); color: var(--ink); background: var(--card-bg); border: 1px solid var(--hairline, var(--card-edge)); border-radius: 6px; padding: 3px 7px; cursor: pointer; max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+  .claim .swap:hover { border-color: rgb(var(--style)); }
   .ref-gone { opacity: 0; transition: opacity 0.6s; pointer-events: none; }
   .count.over { color: rgb(200, 60, 50); font-weight: 600; }
-  .page { transition: margin-left 0.35s cubic-bezier(0.2, 0.8, 0.2, 1); }
-  body.feed-open .page { margin-left: max(16px, calc(50vw - 690px)); }
+  body { box-sizing: border-box; padding-left: var(--pages-space, 0px); padding-right: var(--feed-space, 0px); transition: padding 0.35s cubic-bezier(0.2, 0.8, 0.2, 1); }
+  body.pages-open { --pages-space: 212px; }
+  body.feed-open { --feed-space: var(--feed-width); }
+  .page { --column: min(44rem, max(calc(100% - 20rem - 32px), min(28rem, calc(100% - 32px)))); max-width: var(--column); margin-left: max(0px, calc((100% - var(--column) - 32px - 20rem) / 2)); }
   #feed-toggle {
     position: fixed; top: 14px; right: 14px; z-index: 6; width: 30px; height: 30px; padding: 0; display: grid; place-items: center; cursor: pointer;
     border-radius: 8px; border: 1px solid var(--card-edge); background: var(--card-bg); color: var(--faint); transition: right 0.35s cubic-bezier(0.2, 0.8, 0.2, 1), color 0.2s;
@@ -238,7 +246,7 @@
   .gauge .tip b { color: var(--ink); font-family: var(--mono); font-weight: 400; }
   .count { border: 0; border-left: 1px solid var(--muted); border-radius: 0; padding: 0 0 0 10px; font-size: 11px; color: var(--faint); }
   .count.over { color: var(--ink); background: none; font-weight: 600; border-left-color: var(--accent); }
-  .note, .flag, .fixed, .pill, .judged { border-radius: 0; box-shadow: none; }
+  .flag, .fixed, .pill, .judged { border-radius: 0; box-shadow: none; }
   .pill { background: var(--accent); color: #1E1E1E; }
   .anchor { border-bottom: 1px solid var(--accent); background: none; }
   .ask { border-radius: 0; font: 13px/1.6 var(--mono); }
@@ -284,20 +292,31 @@
   .track b { background: #F386A1; }
   .track i { display: none; }
   @keyframes acted { from { background: #3C2D30; } }
-  #pages { background: var(--surface); backdrop-filter: none; -webkit-backdrop-filter: none; border-right: var(--rule); font: 14px/1.4 var(--sans); }
+  #pages { display: flex; flex-direction: column; background: var(--surface); backdrop-filter: none; -webkit-backdrop-filter: none; border-right: var(--rule); font: 14px/1.4 var(--sans); }
   #new-page { margin-bottom: 12px; padding: 4px 8px; border-bottom: var(--rule); color: var(--ink); font: 13px/1.4 var(--mono); }
   #new-page:hover { color: var(--ink); text-decoration: underline; }
   #page-list li { border-radius: 0; color: var(--soft); }
   #page-list li:hover { color: var(--ink); }
   #page-list li.current { background: none; color: var(--ink); font-weight: 600; }
   #saved { border-radius: 0; background: var(--ok); }
+  #components-panel { margin: auto 0 16px; border: var(--rule); }
+  #components-panel h3 { margin: 0; padding: 2px 8px; background: var(--bar-bg); color: var(--bar-text); font: 400 11px/1.6 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; }
+  #component-list { margin: 0; padding: 0; list-style: none; }
+  #component-list li { display: flex; align-items: center; gap: 8px; padding: 4px 8px; font: 12px/1.4 var(--mono); color: var(--ink); }
+  #component-list li + li { border-top: 1px solid var(--muted); }
+  #component-list li::before { content: ""; flex: none; width: 10px; height: 10px; box-sizing: border-box; border: 2px solid var(--line); background: var(--accent); }
+  #component-list li.off { color: var(--muted); }
+  #component-list li.off::before { border-color: var(--muted); background: none; }
+  #component-list li.toggled { animation: toggled 1.2s ease-out; }
+  @keyframes toggled { from { background: var(--accent); color: #1E1E1E; } }
+  .meta { color: var(--faint); background: none; }
 </style>
 </head>
 <body>
 <div class="page">
   <div id="headers"></div>
-  <div id="gauges"></div>
-  <div id="memory"></div>
+  <div id="gauges" data-ref="component:gauges" data-ref-data="the Impact box: rings scoring the draft on what matters for your Goal"></div>
+  <div id="memory" data-ref="component:memory" data-ref-data="the memory box: facts jevflow knows about you"></div>
   <div class="sheet">
     <div id="backdrop" class="layer" aria-hidden="true"></div>
     <textarea id="editor" class="layer" spellcheck="false" autofocus placeholder="Just write. Say what you're writing, who it's for and what to fix, all inline."></textarea>
@@ -305,12 +324,13 @@
     <div id="comments"></div>
     <div id="reactions"></div>
     <div id="probes"></div>
+    <div id="claims"></div>
   </div>
 </div>
 <button id="feed-toggle" tabindex="-1" title="Decisions (Cmd+J)" aria-label="Decisions"><svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="7" width="2.4" height="6"/><rect x="5.8" y="2" width="2.4" height="11"/><rect x="10.6" y="5" width="2.4" height="8"/></svg></button>
 <i id="saved" aria-hidden="true"></i>
 <button id="pages-toggle" tabindex="-1" title="Pages" aria-label="Pages">≡</button>
-<nav id="pages" aria-label="Pages"><button id="new-page" tabindex="-1" title="New page" aria-label="New page">new page</button><ul id="page-list"></ul></nav>
+<nav id="pages" aria-label="Pages"><button id="new-page" tabindex="-1" title="New page" aria-label="New page">new page</button><ul id="page-list"></ul><section id="components-panel" aria-label="Components"><h3>components</h3><ul id="component-list"></ul></section></nav>
 <aside id="feed" aria-label="Decisions">
   <div class="feed-totals">
     <div><b><span id="feed-decisions">0</span><small id="feed-replays"></small></b>decisions</div>
@@ -337,7 +357,8 @@ let notes = [], insights = [], headers = [], history = [], flashes = [], reactio
 const declined = new Set();
 let timing = null, pendingFixes = [], pendingSuggestions = [];
 const settled = () => timing !== null && timing.mid_thought < 0.5 && timing.interrupt >= 0.3;
-let gaugesTimer, notesTimer, insightsTimer, fixesTimer, notesRequest = 0, insightsRequest = 0, fixesRequest = 0, memoryRequest = 0;
+const RETRY_MS = 2000, REQUEST_TIMEOUT_MS = 15000;
+let notesTimer, insightsTimer, fixesTimer, notesRequest = 0, insightsRequest = 0, fixesRequest = 0, memoryRequest = 0;
 
 const escape = (text) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
@@ -358,6 +379,14 @@ function openQuestions() {
     .sort((first, second) => second.probability - first.probability).slice(0, MAX_OPEN_QUESTIONS);
 }
 
+let pendingToggles = [], metaSpans = [];
+
+function contentText() {
+  let text = editor.value;
+  for (const span of [...notes, ...pendingToggles, ...metaSpans, ...refSpans(text, REF_SPAN)].filter(stillThere)) text = text.slice(0, span.start) + " ".repeat(span.end - span.start) + text.slice(span.end);
+  return text;
+}
+
 function render() {
   const text = editor.value;
   const marks = [];
@@ -372,9 +401,13 @@ function render() {
     if (marks.some((mark) => mark.start < pill.end && pill.start < mark.end)) continue;
     marks.push({ start: pill.start, end: pill.end, open: '<span class="pill">' });
   }
-  for (const note of notes.filter(stillThere)) {
+  for (const claim of claims.filter(stillThere)) {
+    if (marks.some((mark) => mark.start < claim.end && claim.start < mark.end)) continue;
+    marks.push({ start: claim.start, end: claim.end, open: `<span class="claimed" data-claim="${claim.start}">` });
+  }
+  for (const note of [...notes, ...pendingToggles, ...metaSpans].filter(stillThere)) {
     if (marks.some((mark) => mark.start < note.end && note.start < mark.end)) continue;
-    marks.push({ start: note.start, end: note.end, open: '<span class="note">' });
+    marks.push({ start: note.start, end: note.end, open: '<span class="meta">' });
   }
   for (const insight of insights.filter(stillThere)) {
     if (marks.some((mark) => mark.start < insight.end && insight.start < mark.end)) continue;
@@ -407,6 +440,7 @@ function render() {
   renderThread(sheet);
   renderReactions(sheet);
   renderProbes(sheet);
+  renderClaims(sheet);
   headersBox.innerHTML = Object.entries(FIELDS).map(([field, name]) => {
     const entries = headers.filter((header) => header.field === field).map((header) => escape(header.text));
     return entries.length ? `<div><b>${name}:</b>${entries.join("; ")}</div>` : "";
@@ -424,7 +458,8 @@ function renderThread(sheet) {
   card.className = thread.kept ? "card shake" : "card";
   card.dataset.ref = `thread:${slug(thread.question || thread.answer || "open")}`;
   const lines = thread.question ? [`<p><b>You</b>${escape(thread.question)}</p>`] : [];
-  lines.push(`<p class="coworker"><b>jevflow</b>${thread.answer === undefined ? '<span class="status">thinking…</span>' : `${escape(thread.answer)}<span class="measures"></span>`}</p>`);
+  const page = thread.page ? ` <span class="page-link" data-page="${attribute(thread.page.id)}" data-ref="page:${attribute(thread.page.id)}" data-ref-data="${attribute(thread.page.title)}">${escape(thread.page.title)}</span>` : "";
+  lines.push(`<p class="coworker"><b>jevflow</b>${thread.answer === undefined ? '<span class="status">thinking…</span>' : `${escape(thread.answer)}${page}<span class="measures"></span>`}</p>`);
   if (thread.reply) lines.push(`<p><b>You</b>${escape(thread.reply)}</p>`);
   if (thread.status) lines.push(`<p class="status">${escape(thread.status)}</p>`);
   card.innerHTML = lines.join("");
@@ -438,8 +473,14 @@ function renderThread(sheet) {
     }
     slot.replaceWith(thread.rings);
   }
-  card.style.top = `${span.getClientRects()[0].top - sheet.top - 4}px`;
+  const rects = span.getClientRects();
+  commentsLayer.classList.remove("below");
+  card.style.top = `${rects[0].top - sheet.top - 4}px`;
   commentsLayer.appendChild(card);
+  const edge = document.body.classList.contains("feed-open") ? document.getElementById("feed").getBoundingClientRect().left : window.innerWidth;
+  if (card.getBoundingClientRect().right <= edge) return;
+  commentsLayer.classList.add("below");
+  card.style.top = `${rects[rects.length - 1].bottom - sheet.top + 8}px`;
 }
 
 function characterRect(offset) {
@@ -493,6 +534,46 @@ function previousSentence(text, position) {
 function sentencesAfter(position) {
   return (editor.value.slice(position, typingStart()).match(/[.!?\n]/g) || []).length;
 }
+
+const SEARCH_STOPWORDS = new Set("i me my mine we us our is it to of in on at a an the and did said say what where when who how about into from that this with have had was were you your yours for are can could would should there their them then than take bring open show find wrote write written page pages one some".split(" "));
+
+async function searchPages(note) {
+  const words = [...new Set((note.text.toLowerCase().match(/[a-z0-9']+/g) || []).filter((word) => !SEARCH_STOPWORDS.has(word)).map((word) => word.length > 5 ? word.replace(/(ing|ed|es|s)$/, "") : word))];
+  const hits = (line) => words.filter((word) => new RegExp(`\\b${word}`).test(line.toLowerCase())).length;
+  const candidates = Object.entries(readPages()).filter(([id]) => id !== currentPage).map(([id, page]) => {
+    const lines = [page.title, ...page.state.text.split(/\n|(?<=[.!?])\s+/).filter((line) => line.trim() && !declined.has(`note ${line.trim()}`) && line.trim() !== note.text)];
+    const line = lines.reduce((best, other) => hits(other) > hits(best) ? other : best);
+    return { id, title: page.title, line, score: hits(page.title) + hits(line) };
+  }).filter((candidate) => candidate.score > 0).sort((first, second) => second.score - first.score).slice(0, 8);
+  const anchor = { start: note.start, end: note.end, text: note.text };
+  thread = { anchor, question: note.text };
+  const opened = thread;
+  render();
+  const found = await post("/pages/search", { question: note.text, open: note.field === "open", candidates: candidates.map(({ id, title, line }) => ({ id, title, line })) });
+  if (thread !== opened) return;
+  if (!found.id) {
+    thread.answer = "can't find that in your other pages";
+    render();
+    return;
+  }
+  if (note.field === "open") {
+    const [start, end] = removalRange(editor.value, anchor);
+    if (stillThere(anchor)) replaceAll(editor.value.slice(0, start) + editor.value.slice(end), start);
+    thread = null;
+    loadPage(found.id, readPages()[found.id].state);
+    return;
+  }
+  thread.answer = found.line === found.title ? "that's this page:" : `you wrote "${found.line.trim()}" in`;
+  thread.page = { id: found.id, title: found.title };
+  thread.measures = [{ label: "answers it", probability: found.probability, question: "Does this page answer your question?" }];
+  render();
+}
+
+commentsLayer.addEventListener("click", (event) => {
+  const id = event.target.closest(".page-link")?.dataset.page;
+  const page = id && readPages()[id];
+  if (page) loadPage(id, page.state);
+});
 
 async function openThread(anchor, question) {
   thread = { anchor, question };
@@ -579,7 +660,7 @@ function post(path, body) {
   const serialized = JSON.stringify(body);
   const last = lastRequests.get(path);
   if (last && last.serialized === serialized) return last.result;
-  const result = fetch(path, { method: "POST", headers: { "Content-Type": "application/json", "X-Pause": `${PAGE_LOAD} ${inputs}` }, body: serialized }).then((response) => {
+  const result = fetch(path, { method: "POST", headers: { "Content-Type": "application/json", "X-Pause": `${PAGE_LOAD} ${inputs}` }, body: serialized, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) }).then((response) => {
     if (!response.ok) throw new Error(`${path} ${response.status}`);
     return response.json();
   });
@@ -661,12 +742,18 @@ function liftNotes() {
       else if (note.field === "question" && anchor.text) openThread(anchor, note.text);
       continue;
     }
+    if (note.field === "find" || note.field === "open") {
+      declined.add(`note ${note.text}`);
+      searchPages(note);
+      continue;
+    }
     if (note.field === "undo") {
       const [start, end] = removalRange(editor.value, note);
       replaceAll(editor.value.slice(0, start) + editor.value.slice(end), start);
       undo();
       continue;
     }
+    if (note.field === "new_page" && note.headers.some((header) => header.field === "goal" && header.text.trim().toLowerCase() === currentGoal().trim().toLowerCase())) continue;
     if (note.field === "new_page") {
       const [start, end] = removalRange(editor.value, note);
       replaceAll(editor.value.slice(0, start) + editor.value.slice(end), start);
@@ -687,11 +774,16 @@ async function findNotes() {
   const request = ++notesRequest;
   const comment = thread && thread.answer && !thread.reply ? thread.answer : "";
   const breaks = thread && stillThere(thread.anchor) ? [thread.anchor.end] : [];
-  const result = await post("/notes", { text, comment, breaks, goal: currentGoal(), disabled: [...disabled] });
+  const result = await post("/notes", { text, comment, breaks, goal: currentGoal(), disabled: [...disabled] }).catch(() => null);
+  if (!result) { refreshGauges(); notesTimer = setTimeout(findNotes, RETRY_MS); return; }
   if (request !== notesRequest || editor.value !== text) return;
   notes = result.notes;
   timing = result.timing;
   const limit = typingStart();
+  pendingToggles = result.toggles;
+  metaSpans = result.meta;
+  const content = contentText();
+  claims = result.claims.filter((claim) => claim.end <= limit && content.slice(claim.start, claim.end) === claim.text);
   for (const toggle of result.toggles) {
     if (toggle.end > limit || editor.value.slice(toggle.start, toggle.end) !== toggle.text) continue;
     const [from, to] = removalRange(editor.value, toggle);
@@ -706,7 +798,7 @@ async function findNotes() {
   render();
   rescoreProbes();
   if (result.timing.mid_thought < 0.5) refSpans(editor.value, REF_SPAN).filter((span) => !handledRefs.has(span.text)).forEach(handleRef);
-  if ([currentGoal(), latestHeader("audience"), latestHeader("tone")].join("\n") !== gaugeBrief) refreshGauges();
+  refreshGauges();
   if (editor.value !== text) insightsTimer = setTimeout(findInsights, 300);
 }
 
@@ -716,7 +808,7 @@ async function findFixes() {
   const limit = typingStart();
   if (!text.slice(0, limit).trim()) return;
   const request = ++fixesRequest;
-  const result = await post("/fixes", { text, limit, goal: currentGoal() });
+  const result = await post("/fixes", { text: contentText(), limit, goal: currentGoal() });
   if (request !== fixesRequest || editor.value !== text) return;
   const anchored = (fix) => thread && stillThere(thread.anchor) && fix.start < thread.anchor.end && thread.anchor.start < fix.end;
   const clear = result.fixes.filter((fix) => !declined.has(`fix ${fix.text} ${fix.replacement}`) && !anchored(fix) && !notes.some((note) => note.start < fix.end && fix.start < note.end));
@@ -745,7 +837,7 @@ async function findInsights() {
   const text = editor.value;
   if (!text.trim()) return;
   const request = ++insightsRequest;
-  const result = await post("/insights", { text });
+  const result = await post("/insights", { text: contentText() });
   if (request !== insightsRequest || editor.value !== text) return;
   insights = result.insights.map((insight) => ({ ...insight, text: text.slice(insight.start, insight.end) }));
   render();
@@ -825,7 +917,7 @@ function renderGauges() {
   if (gaugeLimit && !count) { count = document.createElement("div"); count.className = "count"; gaugesBox.appendChild(count); }
   if (!gaugeLimit && count) count.remove();
   if (gaugeLimit) {
-    const length = textLength(editor.value.trim());
+    const length = textLength(contentText().replace(/\s+/g, " ").trim());
     count.textContent = `${length} / ${gaugeLimit}`;
     count.classList.toggle("over", length > gaugeLimit);
   }
@@ -855,7 +947,8 @@ async function refreshGauges() {
   gaugeBrief = brief;
   const request = ++gaugesRequest, began = performance.now();
   if (!goal || !text.trim()) { gauges = []; renderGauges(); return; }
-  const result = await post("/gauges", { text, goal, audience, tone });
+  const result = await post("/gauges", { text: contentText().replace(/\s+/g, " ").trim(), goal, audience, tone }).catch(() => null);
+  if (!result) { setTimeout(refreshGauges, RETRY_MS); return; }
   if (request !== gaugesRequest || gaugeBrief !== brief || editor.value !== text) return;
   gaugeTimings.push((performance.now() - began) / 1000);
   gauges = result.gauges;
@@ -978,6 +1071,7 @@ window.addEventListener("keydown", (event) => {
 const REF_TOKEN = /@(?:"[^"\n]*"|[\w-]+)/g;
 const REF_SPAN = /[^.!?\n@]*@(?:"[^"\n]*"|[\w-]+)[^.!?\n]*[.!?]?/g;
 let probes = [], previousValue = "";
+let claims = [];
 const handledRefs = new Set();
 const snapshots = new Map();
 const slug = (text) => text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 24);
@@ -1018,12 +1112,55 @@ async function handleRef(found) {
     render();
     return;
   }
+  const [kind, name] = ref.split(":");
+  if (kind === "component" && result.intent.startsWith("turn_")) { setComponent(name, result.intent === "turn_on"); return; }
+  if (kind === "component" && name === "gauges" && result.intent === "change") {
+    const changed = await post("/gauges/change", { goal: currentGoal(), audience: latestHeader("audience"), tone: latestHeader("tone"), comment: question });
+    if (!changed.categories) return;
+    lastRequests.delete("/gauges");
+    refreshGauges();
+    return;
+  }
+  if (kind === "component") return;
   const element = document.querySelector(`[data-ref="${CSS.escape(ref)}"]`);
   if (!element) return;
   element.dispatchEvent(new CustomEvent("ref-action", { bubbles: true, detail: { ref, instruction: span.text } }));
   element.classList.add("ref-gone");
   setTimeout(() => { element.hidden = true; }, 600);
 }
+
+function renderClaims(sheet) {
+  const box = document.getElementById("claims");
+  const ring = 2 * Math.PI * 8;
+  box.innerHTML = claims.map((claim, index) => {
+    const span = backdrop.querySelector(`[data-claim="${claim.start}"]`);
+    if (!span) return "";
+    const top = span.getClientRects()[0].top - sheet.top + 8;
+    const percent = Math.round(100 * claim.probability);
+    const offered = claim.correction && !declined.has(`fact ${claim.text} ${claim.correction.text}`);
+    const before = claim.text.split(" "), after = offered ? claim.correction.text.split(" ") : [];
+    let head = 0, tail = 0;
+    while (head < Math.min(before.length, after.length) && before[head] === after[head]) head++;
+    while (tail < Math.min(before.length, after.length) - head && before[before.length - 1 - tail] === after[after.length - 1 - tail]) tail++;
+    const swap = offered ? `<button class="swap" data-claim-swap="${index}" title="${escape(claim.correction.text).replace(/"/g, "&quot;")} · ${Math.round(100 * claim.correction.probability)}% true">${escape(after.slice(head, after.length - tail).join(" ") || claim.correction.text)}</button>` : "";
+    return `<div class="claim" style="top: ${top}px"><div class="probe" style="position: static" data-ref="fact:${index + 1}" data-ref-data="${escape(`${percent}% true: "${claim.text}"`).replace(/"/g, "&quot;")}" title="${escape(claim.text).replace(/"/g, "&quot;")}"><svg viewBox="0 0 22 22"><circle class="track" cx="11" cy="11" r="8" fill="none" stroke-width="3"/><circle class="level" cx="11" cy="11" r="8" fill="none" stroke-width="3" stroke-linecap="round" stroke-dasharray="${ring}" stroke-dashoffset="${ring * (1 - claim.probability)}"/></svg>${percent}%</div>${swap}</div>`;
+  }).join("");
+}
+
+document.getElementById("claims").addEventListener("mousedown", (event) => { if (event.target.closest(".swap")) event.preventDefault(); });
+document.getElementById("claims").addEventListener("click", (event) => {
+  const button = event.target.closest(".swap");
+  if (!button) return;
+  const claim = claims[Number(button.dataset.claimSwap)];
+  if (!claim || !stillThere(claim)) return;
+  const replacement = claim.correction.text;
+  applyEdit(claim.start, claim.end, replacement, `fact ${claim.text} ${replacement}`);
+  const flash = { start: claim.start, end: claim.start + replacement.length, text: replacement };
+  flashes.push(flash);
+  setTimeout(() => { flashes = flashes.filter((other) => other !== flash); render(); }, FLASH_MS);
+  claims = claims.filter((other) => other !== claim);
+  render();
+});
 
 function renderProbes(sheet) {
   const box = document.getElementById("probes");
@@ -1045,7 +1182,7 @@ function trackRanges() {
   let suffix = 0;
   while (suffix < before.length - prefix && before[before.length - 1 - suffix] === after[after.length - 1 - suffix]) suffix += 1;
   const removedEnd = before.length - suffix, shift = after.length - before.length;
-  for (const range of [thread?.anchor, ...flashes, ...reactions, ...probes].filter(Boolean)) {
+  for (const range of [thread?.anchor, ...flashes, ...reactions, ...probes, ...claims].filter(Boolean)) {
     if (removedEnd <= range.start) { range.start += shift; range.end += shift; }
     else if (prefix < range.end) range.end = Math.max(range.start, range.end + shift);
   }
@@ -1096,9 +1233,7 @@ editor.addEventListener("input", () => {
   clearTimeout(notesTimer);
   clearTimeout(insightsTimer);
   clearTimeout(fixesTimer);
-  clearTimeout(gaugesTimer);
   notesTimer = setTimeout(() => { findNotes(); findMemory(); }, 600);
-  gaugesTimer = setTimeout(refreshGauges, 600);
   insightsTimer = setTimeout(findInsights, 900);
   fixesTimer = setTimeout(findFixes, 900);
   render();
@@ -1192,7 +1327,7 @@ function loadPage(id, state) {
   probes = [];
   headers = state.headers;
   thread = state.thread;
-  notes = []; insights = []; reactions = []; flashes = []; history = []; pendingFixes = []; pendingSuggestions = []; gauges = []; gaugeLimit = null;
+  notes = []; insights = []; reactions = []; claims = []; flashes = []; history = []; pendingFixes = []; pendingSuggestions = []; gauges = []; gaugeLimit = null;
   declined.clear();
   lastSaved = "";
   savePage();
@@ -1226,6 +1361,22 @@ pageList.addEventListener("click", (event) => {
 document.getElementById("new-page").addEventListener("click", () => openNewPage([]));
 document.getElementById("pages-toggle").addEventListener("click", () => { document.body.classList.toggle("pages-open"); setTimeout(render, 360); });
 if (window.innerWidth > 1100) document.body.classList.add("pages-open");
+
+const componentList = document.getElementById("component-list");
+
+function renderComponents() {
+  componentList.innerHTML = Object.entries(components).map(([name, does]) => `<li data-ref="component:${attribute(name)}" data-ref-data="${attribute(does)}" class="${isOn(name) ? "" : "off"}" title="${attribute(does)}">${escape(name)}</li>`).join("");
+}
+
+componentList.addEventListener("click", (event) => {
+  const name = event.target.closest("[data-ref]")?.dataset.ref.slice("component:".length);
+  if (name) setComponent(name, !isOn(name));
+});
+window.addEventListener("components-loaded", renderComponents);
+window.addEventListener("component-toggle", (event) => {
+  renderComponents();
+  componentList.querySelector(`[data-ref="component:${CSS.escape(event.detail.name)}"]`)?.classList.add("toggled");
+});
 
 restorePage();
 render();

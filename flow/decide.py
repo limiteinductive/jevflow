@@ -12,7 +12,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, create_model
 from pydantic_ai import Agent
 
-from flow import components, feed, generator, reactions
+from flow import claims, components, feed, generator, reactions
 from text_processing import Sentence, split_sentences
 
 MODEL = "typesafe:jev-latest"
@@ -53,14 +53,14 @@ NOTE_CONTEXT = "A writer types their text and, in the same stream, notes to a wr
 
 YesNo = Literal["yes", "no"]
 
-NoteField = Literal["new_page", "goal", "audience", "tone", "to_do", "undo", "question", "reply"]
-"""Header fields, plus "undo" (reverts the last edit), "question" (opens a comment thread on the previous sentence) and "reply" (answers the open comment)."""
+NoteField = Literal["new_page", "goal", "audience", "tone", "to_do", "undo", "question", "reply", "find", "open"]
+"""Header fields, plus "undo" (reverts the last edit), "question" (opens a comment thread on the previous sentence), "reply" (answers the open comment), and "find" and "open" (search the writer's other pages, and switch to the page found)."""
 
 Scope = Literal["sentence", "paragraph"]
 
 QuestionKind = Literal["understand", "opinion", "cut_or_keep", "true", "wording", "other"]
 
-ComponentIntent = Literal["yes_no", "question", "instruction", "mention"]
+ComponentIntent = Literal["yes_no", "question", "instruction", "turn_off", "turn_on", "change", "mention"]
 
 HeaderField = Literal["goal", "audience", "tone", "to_do", "undo"]
 
@@ -161,6 +161,9 @@ agent = Agent(MODEL)
 sentence_notes: dict[tuple[str, str, str, frozenset[str]], SentenceNote | None] = {}
 """Decisions by sentence text; the page asks about the whole draft on every pause, so each sentence is decided once."""
 
+meta_sentences: dict[str, float] = {}
+"""P(the sentence is addressed to the assistant rather than part of the text), by sentence; filled by the note gate."""
+
 sentence_fixes: dict[tuple[str, str], tuple[str | None, GoalSuggestion | None]] = {}
 """Jev-accepted correction and goal suggestion by sentence text and Goal, decided once per pair like `sentence_notes`."""
 
@@ -196,27 +199,38 @@ async def decide_note(sentence: str, comment: str, goal: str, enabled: frozenset
     } if "pages" in enabled else {}
     NoteGate = create_model(
         "NoteGate",
-        __doc__=NOTE_CONTEXT + (f" The writer's coworker just commented on the draft: '{comment}'" if comment else ""),
+        __doc__=NOTE_CONTEXT + " The writer keeps several pages, one per piece of writing." + (f" The writer's coworker just commented on the draft: '{comment}'" if comment else ""),
         plan=(YesNo, Field(description="Is the sentence the writer's plan or intent for the text, rather than part of the text itself?")),
         asks=(YesNo, Field(description="Is the writer asking the assistant for its opinion or help?")),
         is_question=(YesNo, Field(description="Is the sentence a question?")),
         field=(HeaderField, Field(description="What is the note about? goal: what the writer is writing; audience: who it is for; tone: how it should sound; to_do: something to add, check or change; undo: asks to undo the last edit.")),
         for_whom=(YesNo, Field(description="Does the sentence also say who the text is for?")),
+        for_assistant=(YesNo, Field(description="Is the sentence addressed to the writing assistant (a comment, reply, question or instruction to it), rather than part of the text the writer is writing?")),
+        find_page=(YesNo, Field(description="Does the writer ask about something they wrote before, rather than about this text?")),
+        open_page=(YesNo, Field(description="Is the sentence a command to switch to another page, like 'open the tacos one' or 'take me to my essay'?")),
         **reply,
         **new_piece,
         **components.fields(),
         **(reactions.fields(goal) if "reactions" in enabled else {}),
+        **(claims.fields(goal) if "claims" in enabled else {}),
     )
     gate, (note, header), question, audience = await asyncio.gather(
         run(NoteGate, f"Sentence: {sentence}"), generator.extract_note(sentence), generator.extract_question(sentence), generator.extract_audience(sentence)
     )
     if "reactions" in enabled:
         reactions.record(sentence, goal, gate)
+    meta_sentences[sentence] = gate["for_assistant"]
+    if "claims" in enabled:
+        claims.record(sentence, goal, gate)
     if components.record(sentence, gate):
         return None
     if gate.get("reply", 0) >= NOTE_GATE:
         feed.act(gate, "applied", "reply")
         return SentenceNote(sentence, gate["reply"], "reply", [])
+    searches = max(gate["find_page"], gate["open_page"])
+    if searches >= NOTE_GATE:
+        feed.act(gate, "applied", "find_page", "open_page")
+        return SentenceNote(sentence, searches, "open" if gate["open_page"] >= gate["find_page"] else "find", [])
     asks = min(gate["asks"], gate["is_question"])
     new_page = gate.get("new_piece", 0)
     field = "new_page" if new_page >= NOTE_GATE else "question" if asks >= NOTE_GATE else gate["field"]
@@ -256,7 +270,11 @@ async def decide_note(sentence: str, comment: str, goal: str, enabled: frozenset
         return SentenceNote(sentence, probability, field, [])
     if field == "new_page":
         header_check = await run(HeaderCheck, f"Note: {note}\n\nHeader: {header}")
-        return SentenceNote(sentence, probability, field, headers("goal", sentence))
+        seeded = headers("goal", sentence)
+        print(f"new_page: {sentence!r} P={probability:.2f} goal={goal!r} seeds={[header.text for header in seeded]}", flush=True)
+        if any(header.field == "goal" and header.text.strip().lower() == goal.strip().lower() for header in seeded):
+            return None
+        return SentenceNote(sentence, probability, field, seeded)
     check, header_check = await asyncio.gather(run(NoteCheck, f"Sentence: {sentence}"), run(HeaderCheck, f"Note: {note}\n\nHeader: {header}"))
     if note not in sentence or min(check["only_note"], check["whole_note"]) < NOTE_THRESHOLD:
         if check["sentence_only_note"] < NOTE_THRESHOLD:
@@ -301,6 +319,11 @@ async def timing(text: str) -> Timing:
     moment = await run(Moment, f"Draft end: {text[-TIMING_CONTEXT_CHARS:]}")
     feed.act(moment, "applied" if moment["mid_thought"] < MID_THOUGHT_GATE and moment["interrupt"] >= INTERRUPT_GATE else "silent", "mid_thought", "interrupt")
     return Timing(moment["mid_thought"], moment["interrupt"])
+
+
+def meta_spans(sentences: list[Sentence]) -> list[Sentence]:
+    """The sentences Jev reads as addressed to the assistant, which every judge of the text skips."""
+    return [sentence for sentence in sentences if meta_sentences.get(sentence.text.rstrip("."), 0) >= NOTE_GATE]
 
 
 async def find_notes(text: str, comment: str, breaks: list[int], goal: str, enabled: frozenset[str]) -> list[Note]:
@@ -466,7 +489,14 @@ async def about_component(span: str, question: str, component: str, text: str, s
     Intent = create_model(
         "Intent",
         __doc__=f"A writer pasted a reference to a part of their writing assistant's page into their draft. That part: {component}. They typed: '{span}'.",
-        intent=(ComponentIntent, Field(description="yes_no: they ask a yes or no question about that part; question: they ask an open question about it; instruction: they ask to change, drop, forget or mark it done; mention: it is part of the text they are writing.")),
+        intent=(
+            ComponentIntent,
+            Field(
+                description="yes_no: they ask a yes or no question about that part; question: they ask an open question about it; instruction: they ask to drop, forget or mark done an item; "
+                "turn_off: they ask to remove, hide or turn off the whole part; turn_on: they ask to bring it back or turn it on; change: they ask to change what it measures or how it works; "
+                "mention: it is part of the text they are writing."
+            ),
+        ),
     )
     intent, reply, probed, picked = await asyncio.gather(
         run(Intent, f"Typed: {span}"),

@@ -95,6 +95,15 @@ QUESTION_EXAMPLES = [
     ("should I cut this?", "should I cut this?"),
 ]
 
+CLAIM_INSTRUCTIONS = (
+    "The user's sentence states facts about the world, and some are wrong. Rewrite it with every wrong detail corrected (who, where, when, how many), changing no other words. "
+    "Keep the writer's words, slang, casing and tone. Reply with the sentence only."
+)
+CLAIM_EXAMPLES = [
+    ("the eiffel tower is in rome lol", "the eiffel tower is in paris lol"),
+    ("btw python was made by linus torvalds in 2005", "btw python was made by guido van rossum in 1991"),
+]
+
 mlx = httpx.AsyncClient(base_url=MLX_URL, timeout=30)
 
 
@@ -143,16 +152,20 @@ async def fix(sentence: str) -> str:
     return await chat(FIX_INSTRUCTIONS, FIX_EXAMPLES, sentence, 2 * len(sentence.split()) + 16)
 
 
-async def answers(sentence: str, paragraph: str, question: str, goal: str, count: int, context: str) -> list[str]:
+async def sample(instructions: str, examples: list[tuple[str, str]], text: str, count: int, max_tokens: int, temperature: float) -> list[str]:
     """`count` sampled replies from one batched completion; the prompt is Qwen3's chat template with thinking off, written out because /completions takes raw text.
 
-    mlx_lm.server ignores `n` and returns one reply. `context` is `flow.memory.context()` and `flow.components.context()`.
+    mlx_lm.server ignores `n` and returns one reply.
     """
-    turns = messages(ANSWER_INSTRUCTIONS, ANSWER_EXAMPLES, f"{context}Goal: {goal}\nParagraph: {paragraph}\nLast sentence: {sentence}\nQuestion: {question}")
-    prompt = "".join(f"<|im_start|>{turn['role']}\n{turn['content']}<|im_end|>\n" for turn in turns) + "<|im_start|>assistant\n<think>\n\n</think>\n\n"
-    response = await mlx.post("/completions", json={"model": MODEL, "prompt": prompt, "n": count, "max_tokens": 60, "temperature": 0.9})
+    prompt = "".join(f"<|im_start|>{turn['role']}\n{turn['content']}<|im_end|>\n" for turn in messages(instructions, examples, text)) + "<|im_start|>assistant\n<think>\n\n</think>\n\n"
+    response = await mlx.post("/completions", json={"model": MODEL, "prompt": prompt, "n": count, "max_tokens": max_tokens, "temperature": temperature})
     response.raise_for_status()
     return [undash(choice["text"].strip()) for choice in response.json()["choices"]]
+
+
+async def answers(sentence: str, paragraph: str, question: str, goal: str, count: int, context: str) -> list[str]:
+    """`count` sampled replies; `context` is `flow.memory.context()` and `flow.components.context()`."""
+    return await sample(ANSWER_INSTRUCTIONS, ANSWER_EXAMPLES, f"{context}Goal: {goal}\nParagraph: {paragraph}\nLast sentence: {sentence}\nQuestion: {question}", count, 60, 0.9)
 
 
 async def revise(sentence: str, comment: str, reply: str, memory: str) -> str:
@@ -162,3 +175,8 @@ async def revise(sentence: str, comment: str, reply: str, memory: str) -> str:
 async def extract_question(sentence: str) -> str:
     """The question words at the end of `sentence`, copied as the local model reads them."""
     return (await chat(QUESTION_INSTRUCTIONS, QUESTION_EXAMPLES, sentence, 40)).strip().strip("'\"")
+
+
+async def correct_claims(sentence: str, num_drafts: int) -> list[str]:
+    """`num_drafts` sampled rewrites of `sentence` with its wrong facts corrected."""
+    return await sample(CLAIM_INSTRUCTIONS, CLAIM_EXAMPLES, sentence, num_drafts, 2 * len(sentence.split()) + 16, 0.8)
