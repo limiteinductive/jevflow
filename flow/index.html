@@ -74,6 +74,9 @@
   .jev-meter { flex-basis: 100%; display: flex; justify-content: space-between; font-size: 10.5px; letter-spacing: 0.02em; }
   .jev-meter b { color: rgb(var(--thread)); font-weight: 600; }
   .count { align-self: center; margin-left: 8px; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--card-edge); font-variant-numeric: tabular-nums; color: var(--ink); }
+  [data-ref] { cursor: pointer; }
+  .pill { border-radius: 4px; background: rgba(var(--thread), 0.16); color: rgb(var(--thread)); }
+  .ref-gone { opacity: 0; transition: opacity 0.6s; pointer-events: none; }
   .count.over { color: rgb(200, 60, 50); font-weight: 600; }
   .page { transition: margin-left 0.35s cubic-bezier(0.2, 0.8, 0.2, 1); }
   body.feed-open .page { margin-left: max(16px, calc(50vw - 690px)); }
@@ -294,6 +297,10 @@ function render() {
   if (thread && stillThere(thread.anchor)) marks.push({ start: thread.anchor.start, end: thread.anchor.end, open: '<span class="anchor" data-thread="1">' });
   if (judged && stillThere(judged)) marks.push({ start: judged.start, end: judged.end, open: '<span class="judged">' });
   for (const flash of flashes.filter(stillThere)) marks.push({ start: flash.start, end: flash.end, open: '<span class="fixed">' });
+  for (const pill of refSpans(text, /@[\w-]+/g)) {
+    if (marks.some((mark) => mark.start < pill.end && pill.start < mark.end)) continue;
+    marks.push({ start: pill.start, end: pill.end, open: '<span class="pill">' });
+  }
   for (const note of notes.filter(stillThere)) {
     if (marks.some((mark) => mark.start < note.end && note.start < mark.end)) continue;
     marks.push({ start: note.start, end: note.end, open: '<span class="note">' });
@@ -343,6 +350,7 @@ function renderThread(sheet) {
   if (!span) return;
   const card = document.createElement("div");
   card.className = thread.kept ? "card shake" : "card";
+  card.dataset.ref = `thread:${slug(thread.question || thread.answer || "open")}`;
   const lines = thread.question ? [`<p><b>You</b>${escape(thread.question)}</p>`] : [];
   lines.push(`<p class="coworker"><b>jevflow</b>${thread.answer === undefined ? '<span class="status">thinking…</span>' : `${escape(thread.answer)}<span class="measures"></span>`}</p>`);
   if (thread.reply) lines.push(`<p><b>You</b>${escape(thread.reply)}</p>`);
@@ -524,7 +532,7 @@ function clipToThread(note) {
 function liftNotes() {
   const limit = typingStart();
   const typedPast = (note) => note.end <= limit || (note.field === "undo" && /^\s+$/.test(editor.value.slice(note.end, editor.selectionStart)));
-  const ready = notes.filter((note) => stillThere(note) && typedPast(note) && !declined.has(`note ${note.text}`)).sort((first, second) => second.start - first.start);
+  const ready = notes.filter((note) => stillThere(note) && typedPast(note) && !refSpans(note.text, /@[\w-]+/g).length && !declined.has(`note ${note.text}`)).sort((first, second) => second.start - first.start);
   for (const found of ready) {
     notes = notes.filter((other) => other !== found);
     const note = clipToThread(found);
@@ -575,6 +583,7 @@ async function findNotes() {
   applyPendingFixes();
   liftNotes();
   render();
+  if (timing.mid_thought < 0.5) refSpans(editor.value, REF_SPAN).filter((span) => !handledRefs.has(span.text)).forEach(handleRef);
   if ([currentGoal(), latestHeader("audience"), latestHeader("tone")].join("\n") !== gaugeBrief) refreshGauges();
   if (editor.value !== text) insightsTimer = setTimeout(findInsights, 300);
 }
@@ -661,6 +670,7 @@ function setRing(element, probability, question) {
   element.classList.remove("entering");
   const percent = Math.round(100 * probability);
   element.querySelector(".tip").innerHTML = `“${escape(question)}”<br>${percent}% yes · ${levelWord(probability)}`;
+  element.dataset.refData = `${percent}% yes on "${question}"`;
   if (element.target === probability) return;
   const change = element.target === null ? 0 : percent - Math.round(100 * element.target);
   element.target = probability;
@@ -847,6 +857,57 @@ window.addEventListener("keydown", (event) => {
     event.preventDefault();
     toggleFeed();
   }
+});
+
+const REF_SPAN = /[^.!?\n]*@[\w-]+[^.!?\n]*[.!?]?/g;
+const handledRefs = new Set();
+const snapshots = new Map();
+const slug = (text) => text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 24);
+
+function refToken(element) {
+  const [kind, id] = element.dataset.ref.split(":");
+  const shared = [...document.querySelectorAll("[data-ref]")].some((other) => other.dataset.ref.split(":")[1] === id && other.dataset.ref.split(":")[0] !== kind);
+  const name = slug(id);
+  if (/^\d/.test(name)) return `@${kind}${name}`;
+  return shared ? `@${name}-${kind}` : `@${name}`;
+}
+
+function refSpans(text, pattern) {
+  return [...text.matchAll(pattern)].map((match) => ({ start: match.index, end: match.index + match[0].length, text: match[0], snapshot: snapshots.get(match[0].match(/@[\w-]+/)[0]) }))
+    .filter((span) => span.snapshot && span.text.trim());
+}
+
+async function handleRef(found) {
+  handledRefs.add(found.text);
+  const leading = found.text.length - found.text.trimStart().length;
+  const span = { start: found.start + leading, end: found.end, text: found.text.trim() };
+  const anchor = previousSentence(editor.value, span.start);
+  const { ref, component } = found.snapshot;
+  const result = await post("/component", { span: span.text, component, sentence: anchor.text, paragraph: editor.value.slice(Math.max(0, span.start - 400), span.start), goal: currentGoal() });
+  if (result.intent === "mention" || !stillThere(span)) return;
+  const [start, end] = removalRange(editor.value, span);
+  applyEdit(start, end, "", `note ${span.text}`);
+  if (result.intent === "question") {
+    const target = previousSentence(editor.value, start);
+    thread = { anchor: target.text ? target : anchor, question: span.text, answer: result.answer.text, measures: result.answer.measures };
+    render();
+    return;
+  }
+  const element = document.querySelector(`[data-ref="${CSS.escape(ref)}"]`);
+  if (!element) return;
+  element.dispatchEvent(new CustomEvent("ref-action", { bubbles: true, detail: { ref, instruction: span.text } }));
+  element.classList.add("ref-gone");
+  setTimeout(() => { element.hidden = true; }, 600);
+}
+
+document.addEventListener("click", (event) => {
+  const element = event.target.closest("[data-ref]");
+  if (!element) return;
+  const token = refToken(element);
+  const data = Object.entries(element.dataset).filter(([key]) => key !== "ref").map(([key, value]) => `${key}: ${value}`);
+  snapshots.set(token, { ref: element.dataset.ref, component: [...data, element.innerText.replace(/\s+/g, " ").trim()].join("; ") });
+  navigator.clipboard.writeText(token + " ");
+  element.animate([{ outline: "2px solid rgb(var(--thread))", outlineOffset: "2px" }, { outline: "2px solid transparent", outlineOffset: "8px" }], { duration: 600, easing: "ease-out" });
 });
 
 editor.addEventListener("input", () => {

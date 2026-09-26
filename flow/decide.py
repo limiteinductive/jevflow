@@ -55,6 +55,8 @@ Scope = Literal["sentence", "paragraph"]
 
 QuestionKind = Literal["understand", "opinion", "cut_or_keep", "true", "wording", "other"]
 
+ComponentIntent = Literal["question", "instruction", "mention"]
+
 HeaderField = Literal["goal", "audience", "tone", "to_do", "undo"]
 
 @dataclass(frozen=True)
@@ -101,6 +103,13 @@ class Answer:
     """Jev's probabilities behind the reply, shown beside the words."""
     scope: "Scope"
     """What the question is about; the page anchors the thread on the last sentence or the whole paragraph."""
+
+
+@dataclass(frozen=True)
+class ComponentReply:
+    intent: "ComponentIntent"
+    answer: Answer | None
+    """The coworker's reply when the writer asked about the component."""
 
 
 @dataclass(frozen=True)
@@ -399,3 +408,19 @@ async def revise(sentence: str, comment: str, reply: str, proposed: str, memory:
     check = await run(ReviseCheck, f"Sentence: {sentence}\n\nRewrite: {replacement}")
     feed.act(check, "applied" if replacement and min(check.values()) >= FIX_THRESHOLD else "dropped", min(check, key=check.get))
     return replacement if replacement and min(check.values()) >= FIX_THRESHOLD else None
+
+
+async def about_component(span: str, component: str, sentence: str, paragraph: str, goal: str, memory: str) -> ComponentReply:
+    """What the writer meant by typing `span` with a pasted reference to a page component, and the coworker's answer when it is a question.
+
+    The answer is drafted while Jev decides the intent, so a question costs no extra round.
+    """
+    Intent = create_model(
+        "Intent",
+        __doc__=f"A writer pasted a reference to a part of their writing assistant's page into their draft. That part: {component}. They typed: '{span}'.",
+        intent=(ComponentIntent, Field(description="question: they ask about that part; instruction: they ask to change, drop, forget or mark it done; mention: it is part of the text they are writing.")),
+    )
+    intent_task = asyncio.create_task(run(Intent, f"Typed: {span}"))
+    reply = await answer(sentence or paragraph, paragraph, f"{span} ({component})", goal, memory)
+    intent = (await intent_task)["intent"]
+    return ComponentReply(intent, reply if intent == "question" else None)
