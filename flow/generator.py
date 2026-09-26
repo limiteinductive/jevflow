@@ -4,6 +4,7 @@ Jev makes every decision; these calls only write text.
 """
 
 import asyncio
+import re
 
 import httpx
 
@@ -56,19 +57,19 @@ ANSWER_INSTRUCTIONS = VOICE + (
 ANSWER_EXAMPLES = [
     (
         "Goal: a tweet\nParagraph: turns out my cat was right about the vacuum all along\nLast sentence: turns out my cat was right about the vacuum all along\nQuestion: will people get this?",
-        "they won't know what she thought: \"she hid from it for years.\" add it?",
+        "1. they won't know what she thought: \"she hid from it for years.\" add it?\n2. most will. \"right all along\" does the work, leave it.\n3. lead with the vacuum: \"the vacuum lost. my cat called it.\" swap it?",
     ),
     (
         "Goal: a blog post\nParagraph: In this post we will talk about caching.\nLast sentence: In this post we will talk about caching.\nQuestion: how do i make this less boring?",
-        "open on the problem: \"we cached the wrong thing for a year.\" swap it?",
+        "1. open on the problem: \"we cached the wrong thing for a year.\" swap it?\n2. give a number: \"our p99 was 4 seconds.\" add it?\n3. cut it. start with the second sentence.",
     ),
     (
         "Goal: a text to my wife\nParagraph: sorry i was short with you this morning, the deploy was a mess\nLast sentence: sorry i was short with you this morning, the deploy was a mess\nQuestion: does this sound ok?",
-        "warm, owns it. end on her: \"you didn't deserve that.\" add it?",
+        "1. warm, owns it. end on her: \"you didn't deserve that.\" add it?\n2. it's fine as is. sending it matters more than the words.\n3. drop the deploy: \"sorry i was short with you this morning.\" swap it?",
     ),
     (
         "Goal: an x post\nParagraph: our smol team shipped it anyway\nLast sentence: our smol team shipped it anyway\nQuestion: does this land?",
-        "lands. \"smol\" sells the joke, leaving it as is.",
+        "1. lands. \"smol\" sells the joke, leaving it as is.\n2. lands. add what \"it\" is: \"shipped the app anyway.\" add it?\n3. lands. end on a beat: \"shipped it anyway. on a friday.\" add it?",
     ),
 ]
 FEATURES_EXAMPLE = (
@@ -76,7 +77,7 @@ FEATURES_EXAMPLE = (
         "Your features that are on: notes: files what you say about the draft as headers; replies: answers your questions in the margin; gauges: scores the draft for your Goal\nYour features that are off: corrections, reactions\n"
         "Goal: a cover letter\nParagraph: I led the migration to Postgres.\nLast sentence: I led the migration to Postgres.\nQuestion: what can you do?"
     ),
-    "i file your notes up top, answer you here and score it for your goal. corrections and reactions are off, just ask to turn them on.",
+    "1. i file your notes up top, answer you here and score it for your goal. corrections and reactions are off, just ask to turn them on.\n2. notes, replies and goal scores are on. want corrections or reactions too?\n3. i sort your notes, answer questions like this one and score the draft for your goal.",
 )
 """Sent after `ANSWER_EXAMPLES` only with the components' on/off state; without them, a memory preamble makes the 4B copy this reply word for word."""
 REVISE_INSTRUCTIONS = (
@@ -90,6 +91,14 @@ REVISE_EXAMPLES = [
         "my cat hid from the vacuum for years. turns out she was right all along",
     )
 ]
+MASH_INSTRUCTIONS = VOICE + (
+    " The writer's last line is keyboard mash, not words: maybe a cat walked on the keyboard, maybe they are frustrated. Reply with one short playful check-in, nothing else."
+)
+MASH_EXAMPLES = [
+    ("Goal: a text to my wife\nTyped: jkjkjkjk;;;; lkjhg", "you ok? your keyboard just sneezed lol"),
+    ("Goal: a blog post\nTyped: fffffffff dddsa;;l", "did something just sit on your laptop? 😅"),
+]
+"""Worked turns sent before the mash; without them the voice rules turn the check-in into a verdict with a fix."""
 QUESTION_INSTRUCTIONS = (
     "The user message is text a writer typed. It ends with a question the writer asks their coworker about the text, and it may start with the writer's own text. "
     "Reply with the question words only, copied exactly, leaving out the writer's own text."
@@ -184,14 +193,31 @@ async def sample(instructions: str, examples: list[tuple[str, str]], text: str, 
     return [undash(choice["text"].strip()) for choice in response.json()["choices"]]
 
 
+NUMBERED = re.compile(r"^\s*\d+[.)]\s*")
+
+
+async def candidates(instructions: str, examples: list[tuple[str, str]], text: str, count: int, max_tokens: int) -> list[str]:
+    """Up to `count` distinct replies from one completion, which lists them numbered one per line; `examples` replies use that numbered form.
+
+    One list, instead of `count` samples, makes the replies differ by construction: the 4B's samples at temperature 0.9 are often the same reply.
+    """
+    reply = await chat(instructions + f" Reply with {count} candidates that each take a different approach, numbered 1 to {count}, one per line.", examples, text, count * max_tokens)
+    return list(dict.fromkeys(undash(stripped) for line in reply.splitlines() if (stripped := NUMBERED.sub("", line).strip())))[:count]
+
+
 async def answers(sentence: str, paragraph: str, question: str, goal: str, count: int, memory: str, features: str) -> list[str]:
-    """`count` sampled replies; `memory` is `flow.memory.context()`, `features` is `flow.components.context()` or empty."""
+    """`count` distinct replies; `memory` is `flow.memory.context()`, `features` is `flow.components.context()` or empty."""
     examples = [*ANSWER_EXAMPLES, FEATURES_EXAMPLE] if features else ANSWER_EXAMPLES
-    return await sample(ANSWER_INSTRUCTIONS, examples, f"{memory}{features}Goal: {goal}\nParagraph: {paragraph}\nLast sentence: {sentence}\nQuestion: {question}", count, 60, 0.9)
+    return await candidates(ANSWER_INSTRUCTIONS, examples, f"{memory}{features}Goal: {goal}\nParagraph: {paragraph}\nLast sentence: {sentence}\nQuestion: {question}", count, 60)
 
 
 async def revise(sentence: str, comment: str, reply: str, memory: str) -> str:
     return undash(await chat(REVISE_INSTRUCTIONS, REVISE_EXAMPLES, f"{memory}Sentence: {sentence}\nComment: {comment}\nWriter's reply: {reply}", 2 * len(sentence.split()) + 40))
+
+
+async def mash_comment(text: str, goal: str) -> str:
+    """The coworker's one-line check-in on keyboard mash the writer typed."""
+    return undash(await chat(MASH_INSTRUCTIONS, MASH_EXAMPLES, f"Goal: {goal}\nTyped: {text}", 40))
 
 
 async def revisions(sentence: str, comment: str, count: int) -> list[str]:

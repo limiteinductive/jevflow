@@ -32,7 +32,7 @@
   #asks { position: absolute; inset: 0; pointer-events: none; }
   .anchor { border-bottom: 2px solid rgba(var(--thread), 0.7); background: rgba(var(--thread), 0.08); }
   #comments { position: absolute; top: 0; left: calc(100% + 28px); width: 16rem; }
-  #comments.below { left: 0; width: 100%; z-index: 2; }
+  .below { z-index: 2; background: var(--card-bg); }
   .page-link { cursor: pointer; color: rgb(var(--thread)); border-bottom: 1px solid rgba(var(--thread), 0.4); }
   .card {
     position: absolute; left: 0; right: 0; background: var(--card-bg); border: 1px solid var(--card-edge); border-left: 3px solid rgb(var(--thread));
@@ -78,7 +78,7 @@
   .gauge .tip b { color: rgb(var(--thread)); font-weight: 600; }
   .count { align-self: center; margin-left: 8px; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--card-edge); font-variant-numeric: tabular-nums; color: var(--ink); }
   [data-ref] { cursor: pointer; }
-  .pill { border-radius: 4px; background: rgba(var(--thread), 0.16); color: rgb(var(--thread)); }
+  .pill { color: rgb(var(--thread)); text-decoration: underline 1px; text-underline-offset: 3px; }
   .probed { border-radius: 3px; background: rgba(var(--thread), 0.1); }
   #probes { position: absolute; top: 0; left: calc(100% + 28px); }
   .probe { position: absolute; display: flex; align-items: center; gap: 5px; font: 600 11.5px/1 ui-monospace, "SF Mono", Menlo, monospace; color: var(--ink); white-space: nowrap; }
@@ -94,10 +94,10 @@
   .claim .swap:hover { border-color: rgb(var(--style)); }
   .ref-gone { opacity: 0; transition: opacity 0.6s; pointer-events: none; }
   .count.over { color: rgb(200, 60, 50); font-weight: 600; }
-  body { box-sizing: border-box; padding-left: var(--pages-space, 0px); padding-right: var(--feed-space, 0px); transition: padding 0.35s cubic-bezier(0.2, 0.8, 0.2, 1); }
+  body { box-sizing: border-box; padding-left: var(--pages-space, 0px); transition: padding 0.35s cubic-bezier(0.2, 0.8, 0.2, 1); }
   body.pages-open { --pages-space: 212px; }
   body.feed-open { --feed-space: var(--feed-width); }
-  .page { --column: min(44rem, max(calc(100% - 20rem - 32px), min(28rem, calc(100% - 32px)))); max-width: var(--column); margin-left: max(0px, calc((100% - var(--column) - 32px - 20rem) / 2)); }
+  .page { --column: min(44rem, max(calc(100% - 20rem - 32px), min(28rem, calc(100% - 32px)))); --offset: max(0px, calc((100% - var(--column) - 32px - 20rem) / 2)); max-width: min(var(--column), calc(100% - var(--offset) - 32px - var(--feed-space, 0px))); margin-left: var(--offset); }
   #feed-toggle {
     position: fixed; top: 14px; right: 14px; z-index: 6; width: 30px; height: 30px; padding: 0; display: grid; place-items: center; cursor: pointer;
     border-radius: 8px; border: 1px solid var(--card-edge); background: var(--card-bg); color: var(--faint); transition: right 0.35s cubic-bezier(0.2, 0.8, 0.2, 1), color 0.2s;
@@ -255,7 +255,7 @@
   .count { border: 0; border-left: 1px solid var(--muted); border-radius: 0; padding: 0 0 0 10px; font-size: 11px; color: var(--faint); }
   .count.over { color: var(--ink); background: none; font-weight: 600; border-left-color: var(--accent); }
   .flag, .fixed, .pill, .judged { border-radius: 0; box-shadow: none; }
-  .pill { background: var(--accent); color: #1E1E1E; }
+  .pill { background: none; color: var(--accent); text-decoration: underline 1px; text-underline-offset: 3px; }
   .anchor { border-bottom: 1px solid var(--accent); background: none; }
   .ask { border-radius: 0; font: 13px/1.6 var(--mono); }
   .card { padding: 0; background: var(--surface); border: 1px solid var(--muted); border-radius: 0; box-shadow: none; font: 14px/1.4 var(--sans); color: var(--ink); }
@@ -372,7 +372,7 @@ const declined = new Set();
 let timing = null, pendingFixes = [], pendingSuggestions = [];
 const settled = () => timing !== null && timing.mid_thought < 0.5 && timing.interrupt >= 0.3;
 const RETRY_MS = 2000, REQUEST_TIMEOUT_MS = 15000;
-let notesTimer, insightsTimer, fixesTimer, notesRequest = 0, insightsRequest = 0, fixesRequest = 0, memoryRequest = 0;
+let notesTimer, insightsTimer, fixesTimer, notesRequest = 0, insightsRequest = 0, fixesRequest = 0;
 
 const escape = (text) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
@@ -393,11 +393,11 @@ function openQuestions() {
     .sort((first, second) => second.probability - first.probability).slice(0, MAX_OPEN_QUESTIONS);
 }
 
-let pendingToggles = [], metaSpans = [];
+let pendingToggles = [], metaSpans = [], mashSpans = [];
 
 function contentText() {
   let text = editor.value;
-  for (const span of [...notes, ...pendingToggles, ...metaSpans, ...refSpans(text, REF_SPAN)].filter(stillThere)) text = text.slice(0, span.start) + " ".repeat(span.end - span.start) + text.slice(span.end);
+  for (const span of [...notes, ...pendingToggles, ...metaSpans, ...mashSpans, ...refSpans(text, REF_SPAN)].filter(stillThere)) text = text.slice(0, span.start) + " ".repeat(span.end - span.start) + text.slice(span.end);
   return text;
 }
 
@@ -460,18 +460,28 @@ function render() {
   renderReactions(sheet);
   renderProbes(sheet);
   renderClaims(sheet);
-  stackMargin();
+  stackMargin(sheet);
   headersBox.innerHTML = Object.entries(FIELDS).map(([field, name]) => {
-    const entries = headers.filter((header) => header.field === field).map((header) => escape(header.text));
-    return entries.length ? `<div><b>${name}:</b>${entries.join("; ")}</div>` : "";
+    const entries = headers.filter((header) => header.field === field).map((header, index) => `<span data-ref="${field}:${index + 1}">${escape(header.text)}</span>`);
+    return entries.length ? `<div data-ref="header:${field}"><b>${name}:</b>${entries.join("; ")}</div>` : "";
   }).join("") + (ideas.length ? `<div><b>Ideas:</b>${ideas.map((idea, index) => `<span class="idea" data-ref="ideas:${index + 1}" data-ref-data="${attribute(`an angle the assistant suggests writing about, ${idea.measures.map((measure) => `${measure.label} ${Math.round(100 * measure.probability)}%`).join(", ")}`)}" title="${attribute(idea.measures.map((measure) => `${measure.question} ${Math.round(100 * measure.probability)}%`).join("\n"))}"><svg viewBox="0 0 12 12"><circle class="track" cx="6" cy="6" r="4.5" fill="none" stroke-width="2"/><circle class="level" cx="6" cy="6" r="4.5" fill="none" stroke-width="2" stroke-dasharray="${IDEA_RING}" stroke-dashoffset="${IDEA_RING * (1 - idea.probability)}" transform="rotate(-90 6 6)"/></svg>${escape(idea.text)}</span>`).join("")}</div>` : "");
   clearTimeout(saveTimer);
   saveTimer = setTimeout(savePage, SAVE_MS);
 }
 
-function stackMargin() {
+function stackMargin(sheet) {
+  const edge = window.innerWidth - (document.body.classList.contains("feed-open") ? document.getElementById("feed").offsetWidth : 0);
+  const elements = [...document.querySelectorAll("#comments > .card, #probes > .probe, #claims > .claim, #reactions > .reaction")];
+  for (const element of elements) {
+    element.style.translate = "";
+    const rect = element.getBoundingClientRect();
+    element.classList.toggle("below", rect.right > edge);
+    if (rect.right <= edge) continue;
+    element.style.translate = `${sheet.right - rect.right}px 0`;
+    element.style.top = `${parseFloat(element.style.top) + sheet.top + Number(element.dataset.line) + MARGIN_GAP - rect.top}px`;
+  }
   const placed = [];
-  const items = [...document.querySelectorAll("#comments:not(.below) > .card, #probes > .probe, #claims > .claim, #reactions > .reaction")]
+  const items = elements
     .map((element) => ({ element, rect: element.getBoundingClientRect() }))
     .sort((first, second) => first.rect.top - second.rect.top);
   for (const { element, rect } of items) {
@@ -506,13 +516,9 @@ function renderThread(sheet) {
     slot.replaceWith(thread.rings);
   }
   const rects = span.getClientRects();
-  commentsLayer.classList.remove("below");
   card.style.top = `${rects[0].top - sheet.top - 4}px`;
+  card.dataset.line = rects[rects.length - 1].bottom - sheet.top;
   commentsLayer.appendChild(card);
-  const edge = document.body.classList.contains("feed-open") ? document.getElementById("feed").getBoundingClientRect().left : window.innerWidth;
-  if (card.getBoundingClientRect().right <= edge) return;
-  commentsLayer.classList.add("below");
-  card.style.top = `${rects[rects.length - 1].bottom - sheet.top + 8}px`;
 }
 
 function characterRect(offset) {
@@ -550,6 +556,7 @@ function renderReactions(sheet) {
     const endsLine = !text.slice(reaction.end, lineEnd).trim() && (caret < lineStart || caret > lineEnd);
     reaction.element.style.left = `${endsLine ? Math.min(rect.right - sheet.left + 6, sheet.width + 4) : sheet.width + 4}px`;
     reaction.element.style.top = `${rect.top - sheet.top + rect.height / 2}px`;
+    reaction.element.dataset.line = rect.bottom - sheet.top;
     reaction.element.dataset.ref = `reaction:${reaction.start}`;
     reaction.element.dataset.refData = `${reaction.emoji} on '${reaction.text}', P=${reaction.probability.toFixed(2)}`;
   }
@@ -836,7 +843,7 @@ function liftNotes() {
 
 async function findNotes() {
   const text = editor.value;
-  if (!text.trim()) return;
+  if (!text.trim()) return renderMemory({ facts: [], recalled: [] });
   const request = ++notesRequest;
   const comment = thread && thread.answer && !thread.reply ? thread.answer : "";
   const breaks = thread && stillThere(thread.anchor) ? [thread.anchor.end] : [];
@@ -845,11 +852,18 @@ async function findNotes() {
   if (request !== notesRequest || editor.value !== text) return;
   notes = result.notes;
   timing = result.timing;
+  if (isOn("memory")) renderMemory(result.memory);
   const limit = typingStart();
   pendingToggles = result.toggles.filter((toggle) => !refSpans(toggle.text, REF_TOKEN).length);
   metaSpans = result.meta;
+  mashSpans = result.mash.map((span) => ({ ...span, end: span.start + text.slice(span.start, span.end).trimEnd().length, text: text.slice(span.start, span.end).trimEnd() }));
   const content = contentText();
   claims = result.claims.filter((claim) => claim.end <= limit && content.slice(claim.start, claim.end) === claim.text);
+  const mash = mashSpans.find((span) => span.end <= limit && !declined.has(`mash ${span.comment}`));
+  if (mash && !thread) {
+    declined.add(`mash ${mash.comment}`);
+    thread = { anchor: { start: mash.start, end: mash.end, text: mash.text }, question: "", answer: mash.comment, measures: [{ label: "keyboard mash", question: mash.question, probability: mash.probability }] };
+  }
   for (const toggle of pendingToggles) {
     if (toggle.end > limit || editor.value.slice(toggle.start, toggle.end) !== toggle.text) continue;
     const [from, to] = removalRange(editor.value, toggle);
@@ -863,7 +877,8 @@ async function findNotes() {
   liftNotes();
   render();
   rescoreProbes();
-  if (result.timing.mid_thought < 0.5) refSpans(editor.value, REF_SPAN).filter((span) => !handledRefs.has(span.text)).forEach(handleRef);
+  const settledLimit = typingStart();
+  refSpans(editor.value, REF_SPAN).filter((span) => !handledRefs.has(span.text) && (span.end <= settledLimit || result.timing.mid_thought < 0.5)).forEach(handleRef);
   refreshGauges();
   if (editor.value !== text) insightsTimer = setTimeout(findInsights, 300);
 }
@@ -1045,6 +1060,7 @@ function toggleFeed() {
   clearInterval(feedTimer);
   if (open) { pollFeed(); feedTimer = setInterval(pollFeed, FEED_POLL_MS); }
   setTimeout(render, 360);
+  saveView();
 }
 
 async function pollFeed() {
@@ -1134,8 +1150,9 @@ window.addEventListener("keydown", (event) => {
   }
 });
 
-const REF_TOKEN = /@(?:"[^"\n]*"|[\w-]+)/g;
-const REF_SPAN = /[^.!?\n@]*@(?:"[^"\n]*"|[\w-]+)[^.!?\n]*[.!?]?/g;
+const REF_TOKEN = /(?<![\w.])@(?:"[^"\n]*"|[\w-]+)/g;
+const REF_SPAN = /[^.!?\n@]*(?<![\w.])@(?:"[^"\n]*"|[\w-]+)[^.!?\n]*[.!?]?/g;
+const pendingRefs = [];
 let probes = [], previousValue = "";
 let claims = [];
 let ideas = [], seenIdeas = [];
@@ -1151,8 +1168,21 @@ function refToken(element) {
   return shared ? `@${name}-${kind}` : `@${name}`;
 }
 
+function snapshotOf(element) {
+  const data = Object.entries(element.dataset).filter(([key]) => key !== "ref").map(([key, value]) => `${key}: ${value}`);
+  return { ref: element.dataset.ref, component: [...data, element.innerText.replace(/\s+/g, " ").trim()].join("; ") };
+}
+
+function refSnapshot(token) {
+  if (snapshots.has(token)) return snapshots.get(token);
+  const element = [...document.querySelectorAll("[data-ref]")].find((other) => refToken(other) === token);
+  if (element) return snapshotOf(element);
+  const name = token.slice(1);
+  return Object.hasOwn(components, name) ? { ref: `component:${name}`, component: `${name}: ${components[name]}` } : undefined;
+}
+
 function refSpans(text, pattern) {
-  return [...text.matchAll(pattern)].map((match) => ({ start: match.index, end: match.index + match[0].length, text: match[0], snapshot: snapshots.get(match[0].match(new RegExp(REF_TOKEN.source))[0]) }))
+  return [...text.matchAll(pattern)].map((match) => ({ start: match.index, end: match.index + match[0].length, text: match[0], snapshot: refSnapshot(match[0].match(new RegExp(REF_TOKEN.source))[0]) }))
     .filter((span) => span.snapshot && span.text.trim());
 }
 
@@ -1163,7 +1193,9 @@ async function handleRef(found) {
   const anchor = previousSentence(editor.value, span.start);
   const { ref, component } = found.snapshot;
   const question = span.text.replace(new RegExp(REF_TOKEN.source), "").trim();
+  pendingRefs.push(span);
   const result = await post("/component", { span: span.text, question, component, text: found.snapshot.span ? found.snapshot.span.text : "", sentence: anchor.text, paragraph: editor.value.slice(Math.max(0, span.start - 400), span.start), goal: currentGoal() });
+  pendingRefs.splice(pendingRefs.indexOf(span), 1);
   if (result.intent === "mention" || !stillThere(span)) return;
   const [start, end] = removalRange(editor.value, span);
   applyEdit(start, end, "", `note ${span.text}`);
@@ -1173,13 +1205,25 @@ async function handleRef(found) {
     render();
     return;
   }
-  if (result.intent === "question" || result.intent === "yes_no") {
+  const [kind, name] = ref.split(":");
+  if (result.intent === "reply" && thread && thread.answer && ref === `thread:${slug(thread.question || thread.answer || "open")}`) { replyToThread(question); return; }
+  if (result.intent === "set_target" && kind === "gauge" && result.target !== null && typeof setTarget === "function") { setTarget(name, result.target); return; }
+  if (result.answer) {
     const target = previousSentence(editor.value, start);
     thread = { anchor: target.text ? target : anchor, question: span.text, answer: result.answer.text, measures: result.answer.measures };
     render();
     return;
   }
-  const [kind, name] = ref.split(":");
+  const field = kind === "header" ? name : kind;
+  if (FIELDS[field] && ["change", "instruction", "turn_off"].includes(result.intent)) {
+    const entries = headers.filter((header) => header.field === field).map((header) => header.text);
+    const edited = await post("/headers/change", { field: FIELDS[field], entries, comment: question });
+    if (!edited.entries) return;
+    headers = headers.filter((header) => header.field !== field).concat(edited.entries.map((text) => ({ field, text })));
+    render();
+    refreshGauges();
+    return;
+  }
   if (kind === "component" && result.intent.startsWith("turn_")) { setComponent(name, result.intent === "turn_on"); return; }
   if (kind === "component" && name === "gauges" && result.intent === "change") {
     const changed = await post("/gauges/change", { goal: currentGoal(), audience: latestHeader("audience"), tone: latestHeader("tone"), comment: question });
@@ -1224,7 +1268,8 @@ function renderClaims(sheet) {
   box.innerHTML = claims.map((claim, index) => {
     const span = backdrop.querySelector(`[data-claim="${claim.start}"]`);
     if (!span) return "";
-    const top = span.getClientRects()[0].top - sheet.top + 8;
+    const rects = span.getClientRects();
+    const top = rects[0].top - sheet.top + 8, line = rects[rects.length - 1].bottom - sheet.top;
     const percent = Math.round(100 * claim.probability);
     const offered = claim.correction && !declined.has(`fact ${claim.text} ${claim.correction.text}`);
     const before = claim.text.split(" "), after = offered ? claim.correction.text.split(" ") : [];
@@ -1232,7 +1277,7 @@ function renderClaims(sheet) {
     while (head < Math.min(before.length, after.length) && before[head] === after[head]) head++;
     while (tail < Math.min(before.length, after.length) - head && before[before.length - 1 - tail] === after[after.length - 1 - tail]) tail++;
     const swap = offered ? `<button class="swap" data-claim-swap="${index}" title="${escape(claim.correction.text).replace(/"/g, "&quot;")} · ${Math.round(100 * claim.correction.probability)}% true">${escape(after.slice(head, after.length - tail).join(" ") || claim.correction.text)}</button>` : "";
-    return `<div class="claim" style="top: ${top}px"><div class="probe" style="position: static" data-ref="fact:${index + 1}" data-ref-data="${escape(`${percent}% true: "${claim.text}"`).replace(/"/g, "&quot;")}" title="${escape(claim.text).replace(/"/g, "&quot;")}"><svg viewBox="0 0 22 22"><circle class="track" cx="11" cy="11" r="8" fill="none" stroke-width="3"/><circle class="level" cx="11" cy="11" r="8" fill="none" stroke-width="3" stroke-linecap="round" stroke-dasharray="${ring}" stroke-dashoffset="${ring * (1 - claim.probability)}"/></svg>${percent}%</div>${swap}</div>`;
+    return `<div class="claim" data-line="${line}" style="top: ${top}px"><div class="probe" style="position: static" data-ref="fact:${index + 1}" data-ref-data="${escape(`${percent}% true: "${claim.text}"`).replace(/"/g, "&quot;")}" title="${escape(claim.text).replace(/"/g, "&quot;")}"><svg viewBox="0 0 22 22"><circle class="track" cx="11" cy="11" r="8" fill="none" stroke-width="3"/><circle class="level" cx="11" cy="11" r="8" fill="none" stroke-width="3" stroke-linecap="round" stroke-dasharray="${ring}" stroke-dashoffset="${ring * (1 - claim.probability)}"/></svg>${percent}%</div>${swap}</div>`;
   }).join("");
 }
 
@@ -1257,9 +1302,10 @@ function renderProbes(sheet) {
   box.innerHTML = probes.map((probe) => {
     const span = backdrop.querySelector(`[data-probe="${probe.id}"]`);
     if (!span) return "";
-    const top = span.getClientRects()[0].top - sheet.top + 8;
-    if (probe.options) return `<div class="probe" data-ref="probe:${probe.id}" data-ref-data="${attribute(`"${probe.pick}" of ${probe.options.join(", ")} for "${probe.question}" about "${probe.text}"`)}" title="${attribute(probe.question)}" style="top: ${top}px"><span class="dots">${probe.options.map((option) => `<i class="${option === probe.pick ? "pick" : ""}" title="${attribute(option)}"></i>`).join("")}</span>${escape(probe.pick)}</div>`;
-    return `<div class="probe" data-ref="probe:${probe.id}" data-ref-data="${escape(`P(yes) ${Math.round(100 * probe.probability)}% on "${probe.question}" about "${probe.text}"`).replace(/"/g, "&quot;")}" title="${escape(probe.question).replace(/"/g, "&quot;")}" style="top: ${top}px"><svg viewBox="0 0 22 22"><circle class="track" cx="11" cy="11" r="8" fill="none" stroke-width="3"/><circle class="level" cx="11" cy="11" r="8" fill="none" stroke-width="3" stroke-linecap="round" stroke-dasharray="${ring}" stroke-dashoffset="${ring * (1 - probe.probability)}"/></svg>${Math.round(100 * probe.probability)}%</div>`;
+    const rects = span.getClientRects();
+    const top = rects[0].top - sheet.top + 8, line = rects[rects.length - 1].bottom - sheet.top;
+    if (probe.options) return `<div class="probe" data-ref="probe:${probe.id}" data-ref-data="${attribute(`"${probe.pick}" of ${probe.options.join(", ")} for "${probe.question}" about "${probe.text}"`)}" title="${attribute(probe.question)}" data-line="${line}" style="top: ${top}px"><span class="dots">${probe.options.map((option) => `<i class="${option === probe.pick ? "pick" : ""}" title="${attribute(option)}"></i>`).join("")}</span>${escape(probe.pick)}</div>`;
+    return `<div class="probe" data-ref="probe:${probe.id}" data-ref-data="${escape(`P(yes) ${Math.round(100 * probe.probability)}% on "${probe.question}" about "${probe.text}"`).replace(/"/g, "&quot;")}" title="${escape(probe.question).replace(/"/g, "&quot;")}" data-line="${line}" style="top: ${top}px"><svg viewBox="0 0 22 22"><circle class="track" cx="11" cy="11" r="8" fill="none" stroke-width="3"/><circle class="level" cx="11" cy="11" r="8" fill="none" stroke-width="3" stroke-linecap="round" stroke-dasharray="${ring}" stroke-dashoffset="${ring * (1 - probe.probability)}"/></svg>${Math.round(100 * probe.probability)}%</div>`;
   }).join("");
 }
 
@@ -1271,7 +1317,7 @@ function trackRanges() {
   let suffix = 0;
   while (suffix < before.length - prefix && before[before.length - 1 - suffix] === after[after.length - 1 - suffix]) suffix += 1;
   const removedEnd = before.length - suffix, shift = after.length - before.length;
-  for (const range of [thread?.anchor, ...flashes, ...reactions, ...probes, ...claims].filter(Boolean)) {
+  for (const range of [thread?.anchor, ...flashes, ...reactions, ...probes, ...claims, ...pendingRefs].filter(Boolean)) {
     if (removedEnd <= range.start) { range.start += shift; range.end += shift; }
     else if (prefix < range.end) range.end = Math.max(range.start, range.end + shift);
   }
@@ -1308,8 +1354,7 @@ document.addEventListener("click", (event) => {
   const element = event.target.closest("[data-ref]");
   if (!element || event.target.closest("button")) return;
   const token = refToken(element);
-  const data = Object.entries(element.dataset).filter(([key]) => key !== "ref").map(([key, value]) => `${key}: ${value}`);
-  snapshots.set(token, { ref: element.dataset.ref, component: [...data, element.innerText.replace(/\s+/g, " ").trim()].join("; ") });
+  snapshots.set(token, snapshotOf(element));
   navigator.clipboard.writeText(token + " ");
   element.animate([{ outline: "2px solid rgb(var(--thread))", outlineOffset: "2px" }, { outline: "2px solid transparent", outlineOffset: "8px" }], { duration: 600, easing: "ease-out" });
 });
@@ -1322,7 +1367,7 @@ editor.addEventListener("input", () => {
   clearTimeout(notesTimer);
   clearTimeout(insightsTimer);
   clearTimeout(fixesTimer);
-  notesTimer = setTimeout(() => { findNotes(); findMemory(); }, 600);
+  notesTimer = setTimeout(findNotes, 600);
   insightsTimer = setTimeout(findInsights, 900);
   fixesTimer = setTimeout(findFixes, 900);
   render();
@@ -1339,9 +1384,9 @@ window.addEventListener("resize", render);
 function renderMemory(memory) {
   const box = document.getElementById("memory");
   const facts = new Map(memory.facts.map((fact) => [fact.text, fact]));
-  const items = memory.recalled.filter((recall) => facts.has(recall.text)).map((recall) => {
+  const items = memory.recalled.filter((recall) => facts.has(recall.text)).map((recall, index) => {
     const fact = facts.get(recall.text);
-    return `<li title="${fact.day}"><span class="ring" style="--relevance: ${recall.probability.toFixed(2)}" title="relevant ${Math.round(100 * recall.probability)}%"></span>${escape(fact.words)}</li>`;
+    return `<li title="${fact.day}" data-ref="memory:${index}" data-ref-data="${attribute(fact.words)}"><span class="ring" style="--relevance: ${recall.probability.toFixed(2)}" title="relevant ${Math.round(100 * recall.probability)}%"></span>${escape(fact.words)}</li>`;
   });
   if (!items.length) {
     box.classList.remove("shown");
@@ -1352,22 +1397,10 @@ function renderMemory(memory) {
   setTimeout(() => box.classList.add("shown"), 20);
 }
 
-async function findMemory() {
-  if (!isOn("memory")) return;
-  const text = editor.value;
-  const request = ++memoryRequest;
-  if (!text.trim()) return renderMemory({ facts: [], recalled: [] });
-  const memory = await post("/memory/pause", { text });
-  if (request !== memoryRequest) return;
-  for (const sentence of memory.forgets) {
-    const start = editor.value.indexOf(sentence);
-    if (start < 0) continue;
-    const [from, to] = removalRange(editor.value, { start, end: start + sentence.length });
-    replaceAll(editor.value.slice(0, from) + editor.value.slice(to), from);
-  }
-  renderMemory(memory);
-  render();
-}
+document.addEventListener("ref-action", (event) => {
+  if (!event.detail.ref.startsWith("memory:")) return;
+  post("/memory/forget", { sentence: event.detail.instruction.replace(new RegExp(REF_TOKEN.source), `"${event.target.dataset.refData}"`) });
+});
 
 const PAGES_KEY = "jevflow.pages", CURRENT_PAGE_KEY = "jevflow.currentPage", SAVE_MS = 500;
 const savedDot = document.getElementById("saved");
@@ -1378,11 +1411,27 @@ function readPages() {
   try { return JSON.parse(localStorage.getItem(PAGES_KEY)) || {}; } catch { return {}; }
 }
 
+const pageParts = {
+  reactions: {
+    save: () => reactions.map(({ element, ...reaction }) => reaction),
+    restore: (saved = []) => { for (const reaction of reactions) reaction.element?.remove(); reactions = saved.filter(stillThere); },
+  },
+  flags: { save: () => insights, restore: (saved = []) => { insights = saved.filter(stillThere); } },
+  probes: { save: () => probes, restore: (saved = []) => { probes = saved.filter(stillThere); } },
+  claims: { save: () => claims, restore: (saved = []) => { claims = saved.filter(stillThere); } },
+  ideas: { save: () => ({ ideas, seen: seenIdeas }), restore: (saved) => { ideas = saved?.ideas || []; seenIdeas = saved?.seen || []; } },
+  gauges: {
+    save: () => ({ gauges, limit: gaugeLimit, brief: gaugeBrief }),
+    restore: (saved) => { gauges = saved?.gauges || []; gaugeLimit = saved?.limit ?? null; gaugeBrief = saved?.brief || ""; renderGauges(); },
+  },
+};
+
 function pageState() {
   const kept = thread && thread.answer !== undefined ? thread : null;
   return JSON.stringify({
     text: editor.value, headers,
     thread: kept && { anchor: kept.anchor, question: kept.question, answer: kept.answer, measures: kept.measures, reply: kept.reply, comment: kept.comment, replacement: kept.replacement, status: kept.status === "…" ? "" : kept.status },
+    parts: Object.fromEntries(Object.entries(pageParts).map(([name, part]) => [name, part.save()])),
   });
 }
 
@@ -1390,7 +1439,11 @@ function savePage() {
   const state = pageState();
   if (state === lastSaved) return;
   const pages = readPages();
-  pages[currentPage] = { title: currentGoal() || editor.value.trim().split(/\s+/).slice(0, 6).join(" ") || "New page", updatedAt: Date.now(), state: JSON.parse(state), caret: [editor.selectionStart, editor.selectionEnd] };
+  const titled = pages[currentPage]?.titledBy && pages[currentPage].titledBy !== "auto" ? pages[currentPage] : null;
+  pages[currentPage] = {
+    title: titled ? titled.title : currentGoal() || editor.value.trim().split(/\s+/).slice(0, 6).join(" ") || "New page", titledBy: titled ? titled.titledBy : "auto",
+    updatedAt: Date.now(), state: JSON.parse(state), caret: [editor.selectionStart, editor.selectionEnd],
+  };
   try {
     localStorage.setItem(PAGES_KEY, JSON.stringify(pages));
     localStorage.setItem(CURRENT_PAGE_KEY, currentPage);
@@ -1399,6 +1452,14 @@ function savePage() {
   savedDot.classList.remove("landed");
   void savedDot.offsetWidth;
   savedDot.classList.add("landed");
+  renderPages(pages);
+}
+
+function setPageTitle(id, title, titledBy) {
+  const pages = readPages();
+  if (!pages[id]) return;
+  Object.assign(pages[id], { title, titledBy });
+  try { localStorage.setItem(PAGES_KEY, JSON.stringify(pages)); } catch { return; }
   renderPages(pages);
 }
 
@@ -1417,13 +1478,12 @@ function renderPages(pages) {
 function loadPage(id, state) {
   clearTimeout(saveTimer);
   savePage();
-  for (const reaction of reactions) reaction.element?.remove();
   currentPage = id;
   editor.value = previousValue = state.text;
-  probes = [];
   headers = state.headers;
   thread = state.thread;
-  notes = []; insights = []; reactions = []; claims = []; ideas = []; seenIdeas = []; flashes = []; history = []; pendingFixes = []; pendingSuggestions = []; gauges = []; gaugeLimit = null;
+  for (const [name, part] of Object.entries(pageParts)) part.restore(state.parts?.[name]);
+  notes = []; flashes = []; history = []; pendingFixes = []; pendingSuggestions = [];
   declined.clear();
   render();
   const stored = readPages()[id];
@@ -1436,7 +1496,6 @@ function loadPage(id, state) {
   savePage();
   try { localStorage.setItem(CURRENT_PAGE_KEY, id); } catch {}
   renderPages(readPages());
-  refreshGauges();
 }
 
 function openNewPage(seedHeaders) {
@@ -1465,8 +1524,18 @@ document.addEventListener("selectionchange", () => {
   clearTimeout(caretTimer);
   caretTimer = setTimeout(saveCaret, SAVE_MS);
 });
-document.getElementById("pages-toggle").addEventListener("click", () => { document.body.classList.toggle("pages-open"); setTimeout(render, 360); });
-if (window.innerWidth > 1100) document.body.classList.add("pages-open");
+document.getElementById("pages-toggle").addEventListener("click", () => { document.body.classList.toggle("pages-open"); setTimeout(render, 360); saveView(); });
+
+const VIEW_KEY = "jevflow.view";
+let view = null;
+try { view = JSON.parse(localStorage.getItem(VIEW_KEY)); } catch {}
+
+function saveView() {
+  try { localStorage.setItem(VIEW_KEY, JSON.stringify({ feed: document.body.classList.contains("feed-open"), pages: document.body.classList.contains("pages-open") })); } catch {}
+}
+
+if (view ? view.pages : window.innerWidth > 1100) document.body.classList.add("pages-open");
+if (view?.feed) toggleFeed();
 
 const COLLAPSED_KEY = "jevflow.componentsCollapsed";
 const componentsPanel = document.getElementById("components-panel");
@@ -1486,7 +1555,7 @@ function componentMark(name) {
 
 function outlineComponent(name) {
   for (const frame of outlinedFrames) frame.classList.remove("outlined");
-  const frames = name ? [...document.querySelectorAll(`[data-ref="component:${CSS.escape(name)}"]`)].filter((frame) => !componentList.contains(frame)) : [];
+  const frames = name ? [...document.querySelectorAll(`[data-ref="component:${CSS.escape(name)}"]`)].filter((frame) => !componentList.contains(frame) && frame.childElementCount) : [];
   outlinedFrames = frames.flatMap((frame) => frame.offsetHeight ? [frame] : [...frame.children]);
   for (const frame of outlinedFrames) frame.classList.add("outlined");
 }

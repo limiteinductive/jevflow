@@ -5,11 +5,12 @@ The ask rides in the note gate's Jev payload; the angles cost one generator call
 
 import math
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from pydantic import Field, create_model
 
-from flow import decide, feed, generator
+from flow import decide, feed, generator, jev
+from flow.jev import YesNo
 
 if TYPE_CHECKING:
     from flow.decide import Measure
@@ -36,7 +37,7 @@ class Idea:
 
 def fields() -> dict:
     """The ideas question, as a pydantic field to add to the note gate."""
-    return {"wants_ideas": (Literal["yes", "no"], Field(description="Is the writer asking the assistant for ideas or inspiration for what to write?"))}
+    return {"wants_ideas": (YesNo, Field(description="Is the writer asking the assistant for ideas or inspiration for what to write?"))}
 
 
 async def find(text: str, goal: str, context: str, shown: list[str]) -> list[Idea]:
@@ -48,9 +49,9 @@ async def find(text: str, goal: str, context: str, shown: list[str]) -> list[Ide
     IdeaCheck = create_model(
         "IdeaCheck",
         __doc__=f"{context}A writer is stuck on their draft and asks for ideas. Goal: {goal or 'not set'}. Draft: '{text}'. A writing assistant proposes angles to write about.",
-        **{field: (Literal["yes", "no"], Field(description=question)) for field, question in questions.items()},
+        **{field: (YesNo, Field(description=question)) for field, question in questions.items()},
     )
-    check = await decide.run(IdeaCheck, f"Draft: {text}")
+    check = await jev.run(IdeaCheck, f"Draft: {text}")
     scores = {index: math.prod(check[f"{name}_{index}"] for name in CHECKS) for index in range(len(angles)) if min(check[f"{name}_{index}"] for name in FLOORED) >= IDEA_FLOOR}
     kept = sorted(scores, key=scores.get, reverse=True)[:NUM_SHOWN]
     feed.act(check, "shown" if kept else "dropped", *(f"{name}_{index}" for index in kept or range(len(angles)) for name in CHECKS))
