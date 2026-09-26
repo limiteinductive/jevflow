@@ -75,7 +75,7 @@ router = APIRouter()
 
 def enter(request: Request) -> None:
     """Tag the Jev requests made while serving `request` with its pause (the page's `X-Pause` header) and endpoint."""
-    token = request.headers.get("x-pause") or f"request {next(ids)}"
+    token = request.headers.get("x-pause") or f"request {len(pauses)}"
     pause = pauses.setdefault(token, len(pauses) + 1)
     origin.set(Origin(pause, request.url.path.strip("/")))
 
