@@ -40,7 +40,7 @@ QUESTIONS = [
     Question("not_just", "Does the sentence say 'not just X, but Y' or 'not only X, but also Y'?", "'not just X, but Y' pattern", "no contrast pattern", ask="Can you say it straight?"),
     Question("vague_praise", "Does the sentence praise something in vague terms?", "vague praise", "no vague praise", ask="What exactly is good about it?"),
     Question("names_emotion", "Does the sentence name a feeling, such as 'joy' or 'sadness'?", "names feelings instead of showing them", "no named feelings", ask="Can you show the feeling instead of naming it?"),
-    Question("same_shape", "Is the sentence shaped like the sentences around it?", "uniform rhythm", "varied rhythm", ask="Could this sentence be shorter or longer?"),
+    Question("same_shape", "Does the passage around the sentence have a flat, monotonous rhythm?", "uniform rhythm", "varied rhythm", ask="Could this sentence be shorter or longer?"),
     Question("specific", "Does the sentence contain a name, number, date or place?", "has concrete details", "no concrete details", "no", ask="What is the number, name or date?"),
     Question("typo", "Does the sentence contain a typo or a grammar slip?", "has a slip", "no slips at all", "no"),
     Question("informal", "Does the sentence use informal or slang words?", "informal words", "no informal words", "no"),
