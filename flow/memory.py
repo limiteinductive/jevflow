@@ -23,6 +23,8 @@ KEEP_THRESHOLD = 0.7
 RELEVANT_THRESHOLD = 0.5
 MAX_RECALLED = 4
 MAX_DRAFT_CHARS = 600
+REF_TOKEN = re.compile(r"@(?:\"[^\"\n]*\"|[\w-]+)")
+"""A sentence holding a component token is the page's refs flow to read, so the pause leaves it out."""
 FACT_INSTRUCTIONS = (
     "The user message is a sentence a writer typed; it holds a lasting fact or preference about the writer. Reply with three lines. "
     "Line 1: where it goes: profile (the writer's life and work), preferences (how they like their writing), or people/<first name in lowercase> (someone in their life). "
@@ -71,6 +73,10 @@ class Recall:
 
 class Draft(BaseModel):
     text: str
+
+
+class Forget(BaseModel):
+    sentence: str
 
 
 class Undo(BaseModel):
@@ -197,11 +203,11 @@ async def remember(sentence: str) -> None:
 
 
 async def forget(sentence: str) -> None:
-    """Removes every stored fact Jev reads as what `sentence` asks to forget, leaving a dated correction line in its file."""
+    """Removes every stored fact Jev reads as what `sentence` asks to forget; the dated commit is the correction, and only git history keeps the fact."""
     stored = [fact for file in files() for fact in facts(file)]
     if not stored:
         return
-    fields = {f"match_{index}": (decide.YesNo, Field(description=f"Is '{fact.text}' what the writer asks to forget?")) for index, fact in enumerate(stored)}
+    fields = {f"match_{index}": (decide.YesNo, Field(description=f"Does the writer ask jevflow to forget that {fact.words}?")) for index, fact in enumerate(stored)}
     check = await decide.run(create_model("Forget", __doc__=f"The writer typed: '{sentence}'.", **fields), f"Typed: {sentence}")
     matches = [name for name in fields if check[name] >= KEEP_THRESHOLD]
     feed.act(check, "applied" if matches else "dropped", *(matches or fields))
@@ -209,11 +215,18 @@ async def forget(sentence: str) -> None:
         for file in dict.fromkeys(fact.file for index, fact in enumerate(stored) if check[f"match_{index}"] >= KEEP_THRESHOLD):
             aliases, lines = read(file)
             gone = {fact.text for index, fact in enumerate(stored) if fact.file == file and check[f"match_{index}"] >= KEEP_THRESHOLD}
-            write(file, aliases, [line for line in lines if line not in gone] + [f"you asked me to forget this ('{sentence}'); corrected on {date.today()}."], f"Forget: {sentence}")
+            write(file, aliases, [line for line in lines if line not in gone], f"Forget on {date.today()}: {len(gone)} fact(s) the writer asked to forget")
 
 
 @router.get("/memory")
 async def show() -> dict:
+    return state()
+
+
+@router.post("/memory/forget")
+async def forget_ref(request: Forget) -> dict:
+    """A forget typed about a clicked fact, with its token replaced by the fact's words; `forget` gates and writes it."""
+    await forget(request.sentence)
     return state()
 
 
@@ -224,7 +237,7 @@ async def pause(draft: Draft) -> dict:
     Writes run after the response; the reply lists the sentences Jev read as forget requests, for the page to lift out of the text.
     """
     global recalled
-    fresh = list(dict.fromkeys(sentence.text for sentence in decide.line_sentences(draft.text, []) if sentence.text not in seen))
+    fresh = list(dict.fromkeys(sentence.text for sentence in decide.line_sentences(draft.text, []) if sentence.text not in seen and not REF_TOKEN.search(sentence.text)))
     found = candidates(draft.text)
     fields = {}
     for index, sentence in enumerate(fresh):
