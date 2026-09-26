@@ -13,7 +13,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from flow import claims, components, decide, feed, gauges, memory, reactions
+from flow import claims, components, decide, feed, gauges, memory, reactions, titles
 from flow.components import ComponentName
 from mirror.model import Stacker
 from mirror.scan import scan
@@ -27,6 +27,7 @@ app.include_router(gauges.router)
 app.include_router(feed.router)
 app.include_router(memory.router)
 app.include_router(components.router)
+app.include_router(titles.router)
 stacker = Stacker.load()
 
 
