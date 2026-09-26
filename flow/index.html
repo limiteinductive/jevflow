@@ -55,6 +55,10 @@
     background: var(--ask-bg); color: var(--ask-ink); padding: 1px 7px; border-radius: 5px; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis;
   }
   .ask small { opacity: 0.7; margin-left: 0.4rem; }
+  .ask { pointer-events: auto; cursor: pointer; border: 0; text-align: left; }
+  .ask .percent { font: 600 11px var(--mono, ui-monospace); margin-right: 0.45rem; }
+  .ask.rewriting { opacity: 0.5; }
+  .ask.kept .percent::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 4px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px currentColor; }
   #gauges { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px 4px; margin: -1.4rem 0 2.2rem; padding: 10px 12px 8px; border: 1px solid var(--card-edge); border-radius: 12px; background: var(--card-bg); font: 11.5px/1.3 -apple-system, "Helvetica Neue", sans-serif; color: var(--faint); transition: opacity 0.5s; }
   #gauges:empty { display: none; }
   .gauge { position: relative; width: 74px; text-align: center; transition: opacity 0.5s, transform 0.5s; }
@@ -435,9 +439,14 @@ function render() {
     const span = backdrop.querySelector(`[data-insight="${insight.start}"]`);
     if (!span) continue;
     const first = span.getClientRects()[0];
-    const label = document.createElement("div");
-    label.className = "ask";
-    label.innerHTML = `${escape(insight.ask)}<small>${escape(insight.reasons.join(" · "))}</small>`;
+    const label = document.createElement("button");
+    label.type = "button";
+    label.tabIndex = -1;
+    label.className = insight.kept ? "ask kept" : "ask";
+    label.dataset.start = insight.start;
+    label.dataset.ref = `insight:${insight.start}`;
+    label.dataset.refData = `${insight.reasons.join(" · ")} ${Math.round(100 * insight.probability)}%`;
+    label.innerHTML = `<b class="percent">${Math.round(100 * insight.probability)}%</b>${escape(insight.ask)}<small>${escape(insight.reasons.join(" · "))}</small>`;
     label.style.top = `${first.top - sheet.top + 2}px`;
     asksLayer.appendChild(label);
     label.style.left = `${Math.max(0, Math.min(first.left - sheet.left, sheet.width - label.offsetWidth))}px`;
@@ -595,6 +604,26 @@ async function openThread(anchor, question) {
   thread.measures = result.measures;
   render();
 }
+
+async function rewriteInsight(insight, label) {
+  label.classList.add("rewriting");
+  const draft = editor.value;
+  const { rewrite } = await post("/rewrite", { sentence: insight.text, pattern: insight.reasons[0] });
+  if (!rewrite || editor.value !== draft) { insight.kept = true; render(); return; }
+  applyEdit(insight.start, insight.end, rewrite.text, `revise ${insight.text} ${rewrite.text}`);
+  insights = insights.filter((other) => other !== insight);
+  const flash = { start: insight.start, end: insight.start + rewrite.text.length, text: rewrite.text };
+  flashes.push(flash);
+  setTimeout(() => { flashes = flashes.filter((other) => other !== flash); render(); }, FLASH_MS);
+  render();
+}
+
+asksLayer.addEventListener("mousedown", (event) => { if (event.target.closest(".ask")) event.preventDefault(); });
+asksLayer.addEventListener("click", (event) => {
+  const label = event.target.closest(".ask");
+  const insight = label && insights.find((other) => String(other.start) === label.dataset.start);
+  if (insight) rewriteInsight(insight, label);
+});
 
 async function replyToThread(reply) {
   const replied = thread;
