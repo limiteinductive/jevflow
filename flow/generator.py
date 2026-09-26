@@ -26,16 +26,34 @@ FIX_EXAMPLES = [
     ("Honestly the new build is way faster lol", "Honestly the new build is way faster lol"),
     ("their going to love this feature, its so fast", "they're going to love this feature, it's so fast"),
 ]
-ANSWER_INSTRUCTIONS = (
-    "You are a sharp coworker reading a writer's draft over their shoulder. The writer asks you about what they just wrote: the last sentence, or the whole paragraph if the question is about it. "
-    "Answer like a coworker in one or two short sentences: say what a reader of this kind of text might miss in that sentence, and give one concrete fix. "
-    "Keep their joke."
+VOICE = (
+    "You are a writing coworker who texts the writer like a sharp friend. "
+    "Write in lowercase, casual and short: one to three short lines. "
+    "Your first words carry the answer: no preamble, no praise of the question, no restating it. "
+    "Give one concrete recommendation with the exact words to use, then at most one short question that offers to make the change. "
+    "When there are options, number two or three and name your pick, such as 'i'd take 2. which one?'. "
+    "Say plainly what you are not sure of and what you leave alone. A note the writer did not ask for starts with 'heads up:'. "
+    "Match the writer's register: loose on a casual post, calm and warm on a personal note. "
+    "Use at most one emoji, usually none, and no dashes."
+)
+"""The coworker's voice; every prompt whose output the writer reads as the coworker's words starts with it."""
+ANSWER_INSTRUCTIONS = VOICE + (
+    " The writer asks you about what they just wrote: the last sentence, or the whole paragraph if the question is about it. "
+    "Say what a reader of this kind of text might miss, and give one concrete fix. Keep their joke."
 )
 ANSWER_EXAMPLES = [
     (
         "Goal: a tweet\nParagraph: turns out my cat was right about the vacuum all along\nLast sentence: turns out my cat was right about the vacuum all along\nQuestion: will people get this?",
-        "People won't know what the cat's stance was. Add that she hid under the bed every time it ran.",
-    )
+        "most won't know what the cat thought. add that she hid from it for years, then land the joke?",
+    ),
+    (
+        "Goal: a blog post\nParagraph: In this post we will talk about caching.\nLast sentence: In this post we will talk about caching.\nQuestion: how do i make this less boring?",
+        "open on the problem.\n1. \"our p99 was 4 seconds.\"\n2. \"we cached the wrong thing for a year.\"\ni'd take 2. which one?",
+    ),
+    (
+        "Goal: a text to my wife\nParagraph: sorry i was short with you this morning, the deploy was a mess\nLast sentence: sorry i was short with you this morning, the deploy was a mess\nQuestion: does this sound ok?",
+        "it's warm and it owns it. i'd end on her: \"you didn't deserve that.\" add it?",
+    ),
 ]
 REVISE_INSTRUCTIONS = (
     "Rewrite the writer's sentence to do what the writer's reply asks, following the coworker's comment where the reply agrees with it. "
@@ -61,20 +79,23 @@ QUESTION_EXAMPLES = [
 mlx = httpx.AsyncClient(base_url=MLX_URL, timeout=30)
 
 
-async def chat(instructions: str, examples: list[tuple[str, str]], text: str, max_tokens: int, temperature: float = 0, seed: int = 0) -> str:
+def messages(instructions: str, examples: list[tuple[str, str]], text: str) -> list[dict[str, str]]:
+    return [
+        {"role": "system", "content": instructions},
+        *({"role": role, "content": content} for example in examples for role, content in zip(("user", "assistant"), example)),
+        {"role": "user", "content": text},
+    ]
+
+
+async def chat(instructions: str, examples: list[tuple[str, str]], text: str, max_tokens: int) -> str:
     """Completion with Qwen3's thinking mode off, which otherwise spends the token budget and returns empty text."""
     response = await mlx.post(
         "/chat/completions",
         json={
             "model": MODEL,
-            "messages": [
-                {"role": "system", "content": instructions},
-                *({"role": role, "content": content} for example in examples for role, content in zip(("user", "assistant"), example)),
-                {"role": "user", "content": text},
-            ],
+            "messages": messages(instructions, examples, text),
             "max_tokens": max_tokens,
-            "temperature": temperature,
-            "seed": seed,
+            "temperature": 0,
             "chat_template_kwargs": {"enable_thinking": False},
         },
     )
@@ -92,9 +113,16 @@ async def fix(sentence: str) -> str:
     return await chat(FIX_INSTRUCTIONS, FIX_EXAMPLES, sentence, 2 * len(sentence.split()) + 16)
 
 
-async def answer(sentence: str, paragraph: str, question: str, goal: str, seed: int) -> str:
-    """One sampled draft; the server ignores `n`, so each draft is its own request with its own seed."""
-    return await chat(ANSWER_INSTRUCTIONS, ANSWER_EXAMPLES, f"Goal: {goal}\nParagraph: {paragraph}\nLast sentence: {sentence}\nQuestion: {question}", 60, 0.9, seed)
+async def answers(sentence: str, paragraph: str, question: str, goal: str, count: int) -> list[str]:
+    """`count` sampled replies from one batched completion; the prompt is Qwen3's chat template with thinking off, written out because /completions takes raw text.
+
+    mlx_lm.server ignores `n` and returns one reply.
+    """
+    turns = messages(ANSWER_INSTRUCTIONS, ANSWER_EXAMPLES, f"Goal: {goal}\nParagraph: {paragraph}\nLast sentence: {sentence}\nQuestion: {question}")
+    prompt = "".join(f"<|im_start|>{turn['role']}\n{turn['content']}<|im_end|>\n" for turn in turns) + "<|im_start|>assistant\n<think>\n\n</think>\n\n"
+    response = await mlx.post("/completions", json={"model": MODEL, "prompt": prompt, "n": count, "max_tokens": 60, "temperature": 0.9})
+    response.raise_for_status()
+    return [choice["text"].strip() for choice in response.json()["choices"]]
 
 
 async def revise(sentence: str, comment: str, reply: str) -> str:

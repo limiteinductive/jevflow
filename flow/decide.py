@@ -4,6 +4,7 @@ Every decision is one Jev request with all its questions in one payload.
 """
 
 import asyncio
+import math
 from itertools import pairwise
 from dataclasses import dataclass, replace
 from typing import Literal
@@ -20,6 +21,17 @@ NOTE_THRESHOLD = 0.6
 NOTE_GATE = 0.55
 """A sentence holds a note when the plan question reaches this; hand-made notes score 0.89 to 0.98 and prose sentences at most 0.21."""
 NUM_DRAFTS = 3
+DRAFT_CHECKS = {
+    "answers": "Does '{draft}' answer the writer's question?",
+    "specific": "Is '{draft}' specific to this draft, not generic advice?",
+    "voice": "Does '{draft}' keep the writer's voice and joke?",
+    "reads": "Does the reply '{draft}' read the writer's sentence the way the writer meant it?",
+    "leads": "Does the reply '{draft}' lead with its answer?",
+    "quick": "Can the reply '{draft}' be read in two seconds?",
+    "one_question": "Does the reply '{draft}' end with at most one question?",
+    "casual": "Does the reply '{draft}' sound like a casual text from a friend?",
+}
+"""Jev's questions on each drafted reply, all drafts in one payload; a draft ranks by the product of its answers."""
 ANSWER_FLOOR = 0.3
 """Below this on "answers the writer's question?" for every draft, the drafts are resampled once."""
 FIX_THRESHOLD = 0.7
@@ -229,7 +241,7 @@ async def find_fixes(text: str, limit: int) -> list[Fix]:
 
 
 async def answer(sentence: str, paragraph: str, question: str, goal: str) -> Answer:
-    """The coworker's reply to the writer's `question` about `sentence`: the local model drafts `NUM_DRAFTS`, Jev ranks them on answering, being specific and keeping the voice.
+    """The coworker's reply to the writer's `question` about `sentence`: the local model drafts `NUM_DRAFTS` in one batch, Jev ranks them on `DRAFT_CHECKS`.
 
     The top-ranked draft is shown unless every draft fails "answers the question"; then the drafts are resampled once.
     Jev also names the kind of question; when it asks whether readers will understand, P(a reader gets it) leads the measures.
@@ -244,15 +256,15 @@ async def answer(sentence: str, paragraph: str, question: str, goal: str) -> Ans
     )
     meta_task = asyncio.create_task(run(Meta, f"Paragraph: {paragraph}\n\nLast sentence: {sentence}\n\nQuestion: {question}"))
     for attempt in range(2):
-        drafts = list(dict.fromkeys(await asyncio.gather(*(generator.answer(sentence, paragraph, question, goal, NUM_DRAFTS * attempt + seed) for seed in range(NUM_DRAFTS)))))
-        fields = {}
-        for index, draft in enumerate(drafts):
-            fields[f"answers_{index}"] = (YesNo, Field(description=f"Does '{draft}' answer the writer's question?"))
-            fields[f"specific_{index}"] = (YesNo, Field(description=f"Is '{draft}' specific to this draft, not generic advice?"))
-            fields[f"voice_{index}"] = (YesNo, Field(description=f"Does '{draft}' keep the writer's voice and joke?"))
+        drafts = list(dict.fromkeys(await generator.answers(sentence, paragraph, question, goal, NUM_DRAFTS)))
+        fields = {
+            f"{name}_{index}": (YesNo, Field(description=template.format(draft=draft)))
+            for index, draft in enumerate(drafts)
+            for name, template in DRAFT_CHECKS.items()
+        }
         Pick = create_model("Pick", __doc__=f"A writer drafting a {goal or 'text'} asks a coworker about the sentence they just wrote; the coworker drafted replies.", **fields)
         check = await run(Pick, f"Paragraph: {paragraph}\n\nLast sentence: {sentence}\n\nQuestion: {question}")
-        ranked = sorted(((check[f"answers_{index}"] * check[f"specific_{index}"] * check[f"voice_{index}"], check[f"answers_{index}"], draft) for index, draft in enumerate(drafts)), reverse=True)
+        ranked = sorted(((math.prod(check[f"{name}_{index}"] for name in DRAFT_CHECKS), check[f"answers_{index}"], draft) for index, draft in enumerate(drafts)), reverse=True)
         if max(answers for _, answers, _ in ranked) >= ANSWER_FLOOR:
             break
     meta = await meta_task
