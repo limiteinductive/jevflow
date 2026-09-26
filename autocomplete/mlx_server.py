@@ -22,7 +22,7 @@ from fastapi import FastAPI
 from mlx_lm import load, stream_generate
 from mlx_lm.generate import BatchGenerator
 from mlx_lm.sample_utils import make_sampler
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--model", required=True)
@@ -36,9 +36,9 @@ app = FastAPI()
 
 class CompletionRequest(BaseModel):
     prompt: str
-    max_tokens: int = 16
-    n: int = 8
-    temperature: float = 1.0
+    max_tokens: int = Field(16, ge=1, le=512)
+    n: int = Field(8, ge=1, le=32)
+    temperature: float = Field(1.0, ge=0.0, le=2.0)
 
 
 class ChatMessage(BaseModel):
@@ -47,9 +47,9 @@ class ChatMessage(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    messages: list[ChatMessage]
-    max_tokens: int = 512
-    temperature: float = 0.7
+    messages: list[ChatMessage] = Field(min_length=1)
+    max_tokens: int = Field(512, ge=1, le=4096)
+    temperature: float = Field(0.7, ge=0.0, le=2.0)
 
 
 class CompletionChoice(BaseModel):
