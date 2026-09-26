@@ -13,8 +13,8 @@ from mirror.questions import QUESTIONS
 
 MODEL_PATH = Path(__file__).with_name("model.json")
 NUM_REASONS = 3
-NON_REASONS = {"reads_ai", "reads_human", "log_words", "polished", "typo", "fragment"}
-"""Features the stacker uses but never shows: they name no property, or their reason would tell the writer to add roughness."""
+NON_REASONS = {"reads_ai", "reads_human", "log_words", "polished", "typo", "fragment", "quote"}
+"""Features the stacker uses but never shows: they name no property, their reason would tell the writer to add roughness, or (quote) almost all prose lacks it."""
 REASON_BY_NAME = {question.name: (question.yes_reason, question.no_reason) for question in QUESTIONS}
 ASK_BY_NAME = {question.name: question.ask for question in QUESTIONS}
 
