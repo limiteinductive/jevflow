@@ -57,6 +57,15 @@ class Reply(BaseModel):
     """A rewrite the comment already showed, checked instead of a fresh one."""
 
 
+class ComponentNote(BaseModel):
+    span: str
+    component: str
+    """The clicked component's data and visible text, as the page snapshotted them."""
+    sentence: str
+    paragraph: str
+    goal: str
+
+
 class TypedDraft(BaseModel):
     text: str
     limit: int
@@ -109,6 +118,11 @@ async def answer(question: Question) -> dict:
 @app.post("/revise")
 async def revise(reply: Reply) -> dict:
     return {"replacement": await decide.revise(reply.sentence, reply.comment, reply.reply, reply.proposed, memory.context())}
+
+
+@app.post("/component")
+async def component(note: ComponentNote) -> dict:
+    return asdict(await decide.about_component(note.span, note.component, note.sentence, note.paragraph, note.goal, memory.context()))
 
 
 @app.post("/fixes")
