@@ -1029,6 +1029,7 @@ function toggleFeed() {
   clearInterval(feedTimer);
   if (open) { pollFeed(); feedTimer = setInterval(pollFeed, FEED_POLL_MS); }
   setTimeout(render, 360);
+  saveView();
 }
 
 async function pollFeed() {
@@ -1339,11 +1340,26 @@ function readPages() {
   try { return JSON.parse(localStorage.getItem(PAGES_KEY)) || {}; } catch { return {}; }
 }
 
+const pageParts = {
+  reactions: {
+    save: () => reactions.map(({ element, ...reaction }) => reaction),
+    restore: (saved = []) => { for (const reaction of reactions) reaction.element?.remove(); reactions = saved.filter(stillThere); },
+  },
+  flags: { save: () => insights, restore: (saved = []) => { insights = saved.filter(stillThere); } },
+  probes: { save: () => probes, restore: (saved = []) => { probes = saved.filter(stillThere); } },
+  claims: { save: () => claims, restore: (saved = []) => { claims = saved.filter(stillThere); } },
+  gauges: {
+    save: () => ({ gauges, limit: gaugeLimit, brief: gaugeBrief }),
+    restore: (saved) => { gauges = saved?.gauges || []; gaugeLimit = saved?.limit ?? null; gaugeBrief = saved?.brief || ""; renderGauges(); },
+  },
+};
+
 function pageState() {
   const kept = thread && thread.answer !== undefined ? thread : null;
   return JSON.stringify({
     text: editor.value, headers,
     thread: kept && { anchor: kept.anchor, question: kept.question, answer: kept.answer, measures: kept.measures, reply: kept.reply, comment: kept.comment, replacement: kept.replacement, status: kept.status === "…" ? "" : kept.status },
+    parts: Object.fromEntries(Object.entries(pageParts).map(([name, part]) => [name, part.save()])),
   });
 }
 
@@ -1351,7 +1367,11 @@ function savePage() {
   const state = pageState();
   if (state === lastSaved) return;
   const pages = readPages();
-  pages[currentPage] = { title: currentGoal() || editor.value.trim().split(/\s+/).slice(0, 6).join(" ") || "New page", updatedAt: Date.now(), state: JSON.parse(state), caret: [editor.selectionStart, editor.selectionEnd] };
+  const titled = pages[currentPage]?.titledBy && pages[currentPage].titledBy !== "auto" ? pages[currentPage] : null;
+  pages[currentPage] = {
+    title: titled ? titled.title : currentGoal() || editor.value.trim().split(/\s+/).slice(0, 6).join(" ") || "New page", titledBy: titled ? titled.titledBy : "auto",
+    updatedAt: Date.now(), state: JSON.parse(state), caret: [editor.selectionStart, editor.selectionEnd],
+  };
   try {
     localStorage.setItem(PAGES_KEY, JSON.stringify(pages));
     localStorage.setItem(CURRENT_PAGE_KEY, currentPage);
@@ -1360,6 +1380,14 @@ function savePage() {
   savedDot.classList.remove("landed");
   void savedDot.offsetWidth;
   savedDot.classList.add("landed");
+  renderPages(pages);
+}
+
+function setPageTitle(id, title, titledBy) {
+  const pages = readPages();
+  if (!pages[id]) return;
+  Object.assign(pages[id], { title, titledBy });
+  try { localStorage.setItem(PAGES_KEY, JSON.stringify(pages)); } catch { return; }
   renderPages(pages);
 }
 
@@ -1378,13 +1406,12 @@ function renderPages(pages) {
 function loadPage(id, state) {
   clearTimeout(saveTimer);
   savePage();
-  for (const reaction of reactions) reaction.element?.remove();
   currentPage = id;
   editor.value = previousValue = state.text;
-  probes = [];
   headers = state.headers;
   thread = state.thread;
-  notes = []; insights = []; reactions = []; claims = []; flashes = []; history = []; pendingFixes = []; pendingSuggestions = []; gauges = []; gaugeLimit = null;
+  for (const [name, part] of Object.entries(pageParts)) part.restore(state.parts?.[name]);
+  notes = []; flashes = []; history = []; pendingFixes = []; pendingSuggestions = [];
   declined.clear();
   render();
   const stored = readPages()[id];
@@ -1397,7 +1424,6 @@ function loadPage(id, state) {
   savePage();
   try { localStorage.setItem(CURRENT_PAGE_KEY, id); } catch {}
   renderPages(readPages());
-  refreshGauges();
 }
 
 function openNewPage(seedHeaders) {
@@ -1426,8 +1452,18 @@ document.addEventListener("selectionchange", () => {
   clearTimeout(caretTimer);
   caretTimer = setTimeout(saveCaret, SAVE_MS);
 });
-document.getElementById("pages-toggle").addEventListener("click", () => { document.body.classList.toggle("pages-open"); setTimeout(render, 360); });
-if (window.innerWidth > 1100) document.body.classList.add("pages-open");
+document.getElementById("pages-toggle").addEventListener("click", () => { document.body.classList.toggle("pages-open"); setTimeout(render, 360); saveView(); });
+
+const VIEW_KEY = "jevflow.view";
+let view = null;
+try { view = JSON.parse(localStorage.getItem(VIEW_KEY)); } catch {}
+
+function saveView() {
+  try { localStorage.setItem(VIEW_KEY, JSON.stringify({ feed: document.body.classList.contains("feed-open"), pages: document.body.classList.contains("pages-open") })); } catch {}
+}
+
+if (view ? view.pages : window.innerWidth > 1100) document.body.classList.add("pages-open");
+if (view?.feed) toggleFeed();
 
 const COLLAPSED_KEY = "jevflow.componentsCollapsed";
 const componentsPanel = document.getElementById("components-panel");
