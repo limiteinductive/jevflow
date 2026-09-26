@@ -213,42 +213,43 @@
     --bg: #1E1E1E; --surface: #1E1E1E; --surface-2: #3C2D30; --soft: #DEDEDE; --line: #DEDEDE; --bar-bg: #DEDEDE; --bar-text: #1E1E1E; --fill: #F386A1;
     --ink: #FEFEFE; --paper: #1E1E1E; --faint: #ABBAB9; --note: #ABBAB9; --note-bg: #3C2D30; --card-bg: #1E1E1E; --card-edge: #DEDEDE; --hairline: #DEDEDE; --track: #1E1E1E; --ask-bg: #DEDEDE; --ask-ink: #1E1E1E;
   }
-  html, body { background: var(--bg); font-family: var(--sans); }
-  .page { background: var(--surface); border: var(--rule); margin-top: 48px; padding: 0 32px 30vh; box-sizing: border-box; }
-  .page::before { content: "jevflow"; display: flex; margin: 0 -32px 32px; padding: 4px 12px; background: var(--bar-bg); color: var(--bar-text); font: 16px/1.4 var(--mono); }
+  html, body { background: var(--surface); font-family: var(--sans); }
   .layer { font: 21px/1.9 var(--sans); }
-  #headers { font: 16px/1.4 var(--sans); color: var(--soft); margin-bottom: 0; }
-  #headers b { font: 400 16px var(--mono); color: var(--ink); margin-right: 12px; }
+  #headers { font: 14px/1.4 var(--sans); color: var(--soft); margin-bottom: 0; }
+  #headers b { font: 400 12px var(--mono); color: var(--ink); margin-right: 12px; }
   #headers:not(:empty) + #gauges:not(:empty) { margin-top: 8px; }
   #memory { font-family: var(--sans); color: var(--soft); }
   #memory .ring { box-shadow: none; }
-  #gauges { border-radius: 0; margin: 0 0 32px; padding: 12px 16px; gap: 8px 12px; background: var(--surface-2); border: var(--rule); font: 16px/1.4 var(--sans); color: var(--soft); }
+  #gauges { border: 0; border-radius: 0; background: none; margin: 8px 0 32px; padding: 0; gap: 4px 6px; font: 11px/1.3 var(--mono); color: var(--faint); }
   #gauges:empty { display: none; }
-  .jev-meter { font: 16px var(--mono); color: var(--ink); }
-  .jev-meter b { color: var(--ink); font-weight: 400; }
-  .jev-meter span:last-child { color: var(--soft); }
+  .jev-meter { font: 11px var(--mono); color: var(--faint); opacity: 0; transition: opacity 0.3s; }
+  #gauges:hover .jev-meter { opacity: 1; }
+  .jev-meter b { color: var(--faint); font-weight: 400; }
   .gauge .value, .gauge .delta, .gauge .name, .count { font-family: var(--mono); font-weight: 400; letter-spacing: 0; }
-  .gauge .name { color: var(--ink); opacity: 1; font-size: 13px; }
-  .gauge .value { color: var(--ink); font-size: 12px; }
-  .gauge .track { stroke: var(--surface); stroke-width: 4; }
-  .gauge .level, .probe .level { stroke: var(--fill); stroke-width: 4; stroke-linecap: butt; }
+  .gauge { width: 60px; }
+  .gauge svg { width: 34px; height: 34px; }
+  .gauge .name { color: var(--faint); opacity: 1; font-size: 11px; }
+  .gauge .value { height: 34px; line-height: 34px; color: var(--ink); font-size: 10px; }
+  .gauge .delta { top: 24px; font-size: 8.5px; }
+  .gauge .track { stroke: var(--surface-2); stroke-width: 3; }
+  .gauge .level, .probe .level { stroke: var(--fill); stroke-width: 3; stroke-linecap: butt; }
   .probe .track { stroke: var(--surface-2); }
   .probe { font: 400 12px/1 var(--mono); }
-  .probed { border-radius: 0; }
+  .probed { border-radius: 0; background: none; border-bottom: 1px solid var(--accent); }
   .gauge.pulse .level { filter: none; }
   .gauge .delta.up { color: var(--ok); }
   .gauge .delta.down { color: var(--soft); }
   .gauge .tip { border: var(--rule); border-radius: 0; background: var(--surface); color: var(--ink); font: 13px/1.4 var(--sans); }
   .gauge .tip b { color: var(--ink); font-family: var(--mono); font-weight: 400; }
-  .count { border: 0; border-left: var(--rule); border-radius: 0; padding: 0 0 0 12px; font-size: 13px; color: var(--ink); }
-  .count.over { color: var(--ink); background: var(--accent); font-weight: 400; padding: 0 8px; border-left: 0; }
+  .count { border: 0; border-left: 1px solid var(--muted); border-radius: 0; padding: 0 0 0 10px; font-size: 11px; color: var(--faint); }
+  .count.over { color: var(--ink); background: none; font-weight: 600; border-left-color: var(--accent); }
   .note, .flag, .fixed, .pill, .judged { border-radius: 0; box-shadow: none; }
   .pill { background: var(--accent); color: #1E1E1E; }
-  .anchor { border-bottom: 2px solid var(--accent); background: rgba(var(--style), 0.18); }
+  .anchor { border-bottom: 1px solid var(--accent); background: none; }
   .ask { border-radius: 0; font: 13px/1.6 var(--mono); }
-  .card { padding: 0; background: var(--surface); border: var(--rule); border-radius: 0; box-shadow: none; font: 14px/1.4 var(--sans); color: var(--ink); }
-  .card p { margin: 0; padding: 8px 12px; }
-  .card p:first-child { padding: 4px 12px; background: var(--accent); color: #1E1E1E; font: 13px/1.4 var(--mono); }
+  .card { padding: 0; background: var(--surface); border: 1px solid var(--muted); border-radius: 0; box-shadow: none; font: 14px/1.4 var(--sans); color: var(--ink); }
+  .card p { margin: 0; padding: 6px 10px; }
+  .card p:first-child { padding: 1px 10px; background: var(--accent); color: #1E1E1E; font: 11px/1.4 var(--mono); }
   .card p:first-child b, .card .coworker b { display: none; }
   .card .status { font: 12px var(--mono); color: var(--soft); }
   .card .rings { display: inline-flex; vertical-align: middle; gap: 0; margin: 0 0 0 4px; }
@@ -258,7 +259,7 @@
   .gauge.mini .value { position: static; height: auto; line-height: 1; font-size: 11px; }
   .gauge.mini .name { display: none; }
   .gauge.mini .tip { top: calc(100% + 4px); }
-  .reaction { border: var(--rule); border-radius: 0; box-shadow: none; background: var(--surface); }
+  .reaction { border: 1px solid var(--muted); border-radius: 0; box-shadow: none; background: var(--surface); }
   .reaction::after { border-radius: 0; background: linear-gradient(to right, var(--fill) calc(var(--probability) * 100%), var(--surface-2) 0); }
   #feed-toggle, #pages-toggle { border: 0; border-radius: 0; background: none; color: var(--ink); font: 18px/1 var(--mono); }
   body.feed-open #feed-toggle { color: var(--ink); }
