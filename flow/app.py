@@ -154,7 +154,7 @@ class Probe(BaseModel):
 @app.post("/probe")
 async def probe(probe: Probe) -> dict:
     answers = await decide.probe(probe.question, probe.text)
-    feed.act(answers, "shown", "answer")
+    feed.act(answers, "shown", "answer", component="probes")
     return {"probability": answers["answer"]}
 
 
