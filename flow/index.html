@@ -389,11 +389,11 @@ function openQuestions() {
     .sort((first, second) => second.probability - first.probability).slice(0, MAX_OPEN_QUESTIONS);
 }
 
-let pendingToggles = [], metaSpans = [];
+let pendingToggles = [], metaSpans = [], mashSpans = [];
 
 function contentText() {
   let text = editor.value;
-  for (const span of [...notes, ...pendingToggles, ...metaSpans, ...refSpans(text, REF_SPAN)].filter(stillThere)) text = text.slice(0, span.start) + " ".repeat(span.end - span.start) + text.slice(span.end);
+  for (const span of [...notes, ...pendingToggles, ...metaSpans, ...mashSpans, ...refSpans(text, REF_SPAN)].filter(stillThere)) text = text.slice(0, span.start) + " ".repeat(span.end - span.start) + text.slice(span.end);
   return text;
 }
 
@@ -837,8 +837,14 @@ async function findNotes() {
   const limit = typingStart();
   pendingToggles = result.toggles;
   metaSpans = result.meta;
+  mashSpans = result.mash.map((span) => ({ ...span, end: span.start + text.slice(span.start, span.end).trimEnd().length, text: text.slice(span.start, span.end).trimEnd() }));
   const content = contentText();
   claims = result.claims.filter((claim) => claim.end <= limit && content.slice(claim.start, claim.end) === claim.text);
+  const mash = mashSpans.find((span) => span.end <= limit && !declined.has(`mash ${span.comment}`));
+  if (mash && !thread) {
+    declined.add(`mash ${mash.comment}`);
+    thread = { anchor: { start: mash.start, end: mash.end, text: mash.text }, question: "", answer: mash.comment, measures: [{ label: "keyboard mash", question: mash.question, probability: mash.probability }] };
+  }
   for (const toggle of result.toggles) {
     if (toggle.end > limit || editor.value.slice(toggle.start, toggle.end) !== toggle.text) continue;
     const [from, to] = removalRange(editor.value, toggle);
