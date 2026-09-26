@@ -160,6 +160,17 @@ async def component(note: ComponentNote) -> dict:
     return asdict(await decide.about_component(note.span, note.question, note.component, note.text, note.sentence, note.paragraph, note.goal, memory.context()))
 
 
+class HeaderChange(BaseModel):
+    field: str
+    entries: list[str]
+    comment: str
+
+
+@app.post("/headers/change")
+async def headers_change(change: HeaderChange) -> dict:
+    return {"entries": await decide.edit_header(change.field, change.entries, change.comment)}
+
+
 class Probe(BaseModel):
     question: str
     text: str

@@ -78,7 +78,7 @@
   .gauge .tip b { color: rgb(var(--thread)); font-weight: 600; }
   .count { align-self: center; margin-left: 8px; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--card-edge); font-variant-numeric: tabular-nums; color: var(--ink); }
   [data-ref] { cursor: pointer; }
-  .pill { border-radius: 4px; background: rgba(var(--thread), 0.16); color: rgb(var(--thread)); }
+  .pill { color: rgb(var(--thread)); text-decoration: underline 1px; text-underline-offset: 3px; }
   .probed { border-radius: 3px; background: rgba(var(--thread), 0.1); }
   #probes { position: absolute; top: 0; left: calc(100% + 28px); }
   .probe { position: absolute; display: flex; align-items: center; gap: 5px; font: 600 11.5px/1 ui-monospace, "SF Mono", Menlo, monospace; color: var(--ink); white-space: nowrap; }
@@ -251,7 +251,7 @@
   .count { border: 0; border-left: 1px solid var(--muted); border-radius: 0; padding: 0 0 0 10px; font-size: 11px; color: var(--faint); }
   .count.over { color: var(--ink); background: none; font-weight: 600; border-left-color: var(--accent); }
   .flag, .fixed, .pill, .judged { border-radius: 0; box-shadow: none; }
-  .pill { background: var(--accent); color: #1E1E1E; }
+  .pill { background: none; color: var(--accent); text-decoration: underline 1px; text-underline-offset: 3px; }
   .anchor { border-bottom: 1px solid var(--accent); background: none; }
   .ask { border-radius: 0; font: 13px/1.6 var(--mono); }
   .card { padding: 0; background: var(--surface); border: 1px solid var(--muted); border-radius: 0; box-shadow: none; font: 14px/1.4 var(--sans); color: var(--ink); }
@@ -458,8 +458,8 @@ function render() {
   renderClaims(sheet);
   stackMargin();
   headersBox.innerHTML = Object.entries(FIELDS).map(([field, name]) => {
-    const entries = headers.filter((header) => header.field === field).map((header) => escape(header.text));
-    return entries.length ? `<div><b>${name}:</b>${entries.join("; ")}</div>` : "";
+    const entries = headers.filter((header) => header.field === field).map((header, index) => `<span data-ref="${field}:${index + 1}">${escape(header.text)}</span>`);
+    return entries.length ? `<div data-ref="header:${field}"><b>${name}:</b>${entries.join("; ")}</div>` : "";
   }).join("");
   clearTimeout(saveTimer);
   saveTimer = setTimeout(savePage, SAVE_MS);
@@ -859,7 +859,8 @@ async function findNotes() {
   liftNotes();
   render();
   rescoreProbes();
-  if (result.timing.mid_thought < 0.5) refSpans(editor.value, REF_SPAN).filter((span) => !handledRefs.has(span.text)).forEach(handleRef);
+  const settledLimit = typingStart();
+  refSpans(editor.value, REF_SPAN).filter((span) => !handledRefs.has(span.text) && (span.end <= settledLimit || result.timing.mid_thought < 0.5)).forEach(handleRef);
   refreshGauges();
   if (editor.value !== text) insightsTimer = setTimeout(findInsights, 300);
 }
@@ -1130,8 +1131,9 @@ window.addEventListener("keydown", (event) => {
   }
 });
 
-const REF_TOKEN = /@(?:"[^"\n]*"|[\w-]+)/g;
-const REF_SPAN = /[^.!?\n@]*@(?:"[^"\n]*"|[\w-]+)[^.!?\n]*[.!?]?/g;
+const REF_TOKEN = /(?<![\w.])@(?:"[^"\n]*"|[\w-]+)/g;
+const REF_SPAN = /[^.!?\n@]*(?<![\w.])@(?:"[^"\n]*"|[\w-]+)[^.!?\n]*[.!?]?/g;
+const pendingRefs = [];
 let probes = [], previousValue = "";
 let claims = [];
 const handledRefs = new Set();
@@ -1146,8 +1148,21 @@ function refToken(element) {
   return shared ? `@${name}-${kind}` : `@${name}`;
 }
 
+function snapshotOf(element) {
+  const data = Object.entries(element.dataset).filter(([key]) => key !== "ref").map(([key, value]) => `${key}: ${value}`);
+  return { ref: element.dataset.ref, component: [...data, element.innerText.replace(/\s+/g, " ").trim()].join("; ") };
+}
+
+function refSnapshot(token) {
+  if (snapshots.has(token)) return snapshots.get(token);
+  const element = [...document.querySelectorAll("[data-ref]")].find((other) => refToken(other) === token);
+  if (element) return snapshotOf(element);
+  const name = token.slice(1);
+  return Object.hasOwn(components, name) ? { ref: `component:${name}`, component: `${name}: ${components[name]}` } : undefined;
+}
+
 function refSpans(text, pattern) {
-  return [...text.matchAll(pattern)].map((match) => ({ start: match.index, end: match.index + match[0].length, text: match[0], snapshot: snapshots.get(match[0].match(new RegExp(REF_TOKEN.source))[0]) }))
+  return [...text.matchAll(pattern)].map((match) => ({ start: match.index, end: match.index + match[0].length, text: match[0], snapshot: refSnapshot(match[0].match(new RegExp(REF_TOKEN.source))[0]) }))
     .filter((span) => span.snapshot && span.text.trim());
 }
 
@@ -1158,7 +1173,9 @@ async function handleRef(found) {
   const anchor = previousSentence(editor.value, span.start);
   const { ref, component } = found.snapshot;
   const question = span.text.replace(new RegExp(REF_TOKEN.source), "").trim();
+  pendingRefs.push(span);
   const result = await post("/component", { span: span.text, question, component, text: found.snapshot.span ? found.snapshot.span.text : "", sentence: anchor.text, paragraph: editor.value.slice(Math.max(0, span.start - 400), span.start), goal: currentGoal() });
+  pendingRefs.splice(pendingRefs.indexOf(span), 1);
   if (result.intent === "mention" || !stillThere(span)) return;
   const [start, end] = removalRange(editor.value, span);
   applyEdit(start, end, "", `note ${span.text}`);
@@ -1168,13 +1185,25 @@ async function handleRef(found) {
     render();
     return;
   }
-  if (result.intent === "question" || result.intent === "yes_no") {
+  const [kind, name] = ref.split(":");
+  if (result.intent === "reply" && thread && thread.answer && ref === `thread:${slug(thread.question || thread.answer || "open")}`) { replyToThread(question); return; }
+  if (result.intent === "set_target" && kind === "gauge" && result.target !== null && typeof setTarget === "function") { setTarget(name, result.target); return; }
+  if (result.answer) {
     const target = previousSentence(editor.value, start);
     thread = { anchor: target.text ? target : anchor, question: span.text, answer: result.answer.text, measures: result.answer.measures };
     render();
     return;
   }
-  const [kind, name] = ref.split(":");
+  const field = kind === "header" ? name : kind;
+  if (FIELDS[field] && ["change", "instruction", "turn_off"].includes(result.intent)) {
+    const entries = headers.filter((header) => header.field === field).map((header) => header.text);
+    const edited = await post("/headers/change", { field: FIELDS[field], entries, comment: question });
+    if (!edited.entries) return;
+    headers = headers.filter((header) => header.field !== field).concat(edited.entries.map((text) => ({ field, text })));
+    render();
+    refreshGauges();
+    return;
+  }
   if (kind === "component" && result.intent.startsWith("turn_")) { setComponent(name, result.intent === "turn_on"); return; }
   if (kind === "component" && name === "gauges" && result.intent === "change") {
     const changed = await post("/gauges/change", { goal: currentGoal(), audience: latestHeader("audience"), tone: latestHeader("tone"), comment: question });
@@ -1244,7 +1273,7 @@ function trackRanges() {
   let suffix = 0;
   while (suffix < before.length - prefix && before[before.length - 1 - suffix] === after[after.length - 1 - suffix]) suffix += 1;
   const removedEnd = before.length - suffix, shift = after.length - before.length;
-  for (const range of [thread?.anchor, ...flashes, ...reactions, ...probes, ...claims].filter(Boolean)) {
+  for (const range of [thread?.anchor, ...flashes, ...reactions, ...probes, ...claims, ...pendingRefs].filter(Boolean)) {
     if (removedEnd <= range.start) { range.start += shift; range.end += shift; }
     else if (prefix < range.end) range.end = Math.max(range.start, range.end + shift);
   }
@@ -1281,8 +1310,7 @@ document.addEventListener("click", (event) => {
   const element = event.target.closest("[data-ref]");
   if (!element || event.target.closest("button")) return;
   const token = refToken(element);
-  const data = Object.entries(element.dataset).filter(([key]) => key !== "ref").map(([key, value]) => `${key}: ${value}`);
-  snapshots.set(token, { ref: element.dataset.ref, component: [...data, element.innerText.replace(/\s+/g, " ").trim()].join("; ") });
+  snapshots.set(token, snapshotOf(element));
   navigator.clipboard.writeText(token + " ");
   element.animate([{ outline: "2px solid rgb(var(--thread))", outlineOffset: "2px" }, { outline: "2px solid transparent", outlineOffset: "8px" }], { duration: 600, easing: "ease-out" });
 });
