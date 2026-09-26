@@ -99,6 +99,15 @@ MASH_EXAMPLES = [
     ("Goal: a blog post\nTyped: fffffffff dddsa;;l", "did something just sit on your laptop? 😅"),
 ]
 """Worked turns sent before the mash; without them the voice rules turn the check-in into a verdict with a fix."""
+EMOJI_INSTRUCTIONS = (
+    "You react to a friend's line like a friend texting back. Read its tone first: a joke, a sweet line, a bold take, news. Propose 4 different emoji that fit that tone. "
+    "Reply with 4 lines, each the emoji, a space, then what it means in two words."
+)
+EMOJI_EXAMPLES = [
+    ("Goal: a slack post\nLine: the migration finished with zero downtime", "🎉 big win\n🙌 well done\n🚀 shipped it\n😮‍💨 huge relief"),
+    ("Goal: an x post\nLine: my cat has more github stars than me", "😂 so funny\n💀 im dead\n😭 too real\n👏 well played"),
+]
+"""The candidates are emoji, not a line the writer reads, so the prompt leaves out `VOICE`: with it, the local model proposes verdicts like '🤔 confused' for a joke."""
 QUESTION_INSTRUCTIONS = (
     "The user message is text a writer typed. It ends with a question the writer asks their coworker about the text, and it may start with the writer's own text. "
     "Reply with the question words only, copied exactly, leaving out the writer's own text."
@@ -208,6 +217,12 @@ async def revisions(sentence: str, comment: str, count: int) -> list[str]:
     """`count` sampled rewrites of `sentence` as `comment` asks, one request each since the server returns one reply per request."""
     batches = await asyncio.gather(*(sample(REVISE_INSTRUCTIONS, REVISE_EXAMPLES, f"Sentence: {sentence}\nComment: {comment}\nWriter's reply: rewrite it", 1, 2 * len(sentence.split()) + 40, 0.9) for _ in range(count)))
     return [rewrite for batch in batches for rewrite in batch]
+
+
+async def emoji_candidates(sentence: str, goal: str) -> list[str]:
+    """Up to 4 reaction candidates for `sentence`, each an emoji and its two-word meaning, one per distinct emoji."""
+    lines = [line.strip() for line in (await chat(EMOJI_INSTRUCTIONS, EMOJI_EXAMPLES, f"Goal: {goal}\nLine: {sentence}", 60)).splitlines() if line.strip()]
+    return list({line.split()[0]: line for line in lines}.values())[:4]
 
 
 async def extract_question(sentence: str) -> str:
