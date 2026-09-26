@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560" viewBox="0 0 1200 560" font-family="Inter Tight, -apple-system, 'Helvetica Neue', Arial, sans-serif">
+  <defs>
+    <style>
+      .mono { font-family: 'JetBrains Mono', 'SF Mono', Menlo, monospace; }
+      .t { fill: #1E1E1E; }
+      .s { fill: #3C2D30; }
+      .box { fill: #FEFEFE; stroke: #1E1E1E; stroke-width: 2; }
+      .arrow { stroke: #1E1E1E; stroke-width: 2; fill: none; marker-end: url(#head); }
+      .pink { stroke: #F386A1; }
+    </style>
+    <marker id="head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1E1E1E"/>
+    </marker>
+    <marker id="headp" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#F386A1"/>
+    </marker>
+  </defs>
+  <rect width="1200" height="560" fill="#FEFEFE"/>
+
+  <text x="40" y="52" font-size="26" font-weight="600" class="t">How a pause in your typing becomes a decision</text>
+  <text x="40" y="80" font-size="15" class="s">The local model only writes text. Jev, the judge, makes every call about what reaches the page.</text>
+
+  <!-- browser -->
+  <rect x="40" y="130" width="250" height="330" class="box"/>
+  <rect x="40" y="130" width="250" height="34" fill="#1E1E1E"/>
+  <text x="56" y="152" font-size="13" fill="#FEFEFE" class="mono">browser · flow/index.html</text>
+  <g font-size="14" class="t">
+    <text x="60" y="196">one text box</text>
+    <text x="60" y="224">Goal · Audience · Tone headers</text>
+    <text x="60" y="252">margin comments</text>
+    <text x="60" y="280">impact rings</text>
+    <text x="60" y="308">flags, fixes, emoji</text>
+    <text x="60" y="336">pages + components panel</text>
+    <text x="60" y="364">decisions feed (Cmd+J)</text>
+  </g>
+  <text x="60" y="430" font-size="12" class="s">sends the draft on every pause</text>
+
+  <!-- server -->
+  <rect x="400" y="130" width="340" height="330" class="box"/>
+  <rect x="400" y="130" width="340" height="34" fill="#1E1E1E"/>
+  <text x="416" y="152" font-size="13" fill="#FEFEFE" class="mono">FastAPI · flow/app.py :8000</text>
+  <g font-size="12.5" class="mono t">
+    <text x="420" y="194">/notes</text><text x="520" y="194" font-family="Inter Tight, -apple-system, Helvetica, Arial, sans-serif" font-size="14">notes, reactions, claims</text>
+    <text x="420" y="218">/answer</text><text x="520" y="218" font-family="Inter Tight, -apple-system, Helvetica, Arial, sans-serif" font-size="14">reply to "wdyt?"</text>
+    <text x="420" y="242">/revise</text><text x="520" y="242" font-family="Inter Tight, -apple-system, Helvetica, Arial, sans-serif" font-size="14">apply "ok do it"</text>
+    <text x="420" y="266">/fixes</text><text x="520" y="266" font-family="Inter Tight, -apple-system, Helvetica, Arial, sans-serif" font-size="14">small corrections</text>
+    <text x="420" y="290">/gauges</text><text x="520" y="290" font-family="Inter Tight, -apple-system, Helvetica, Arial, sans-serif" font-size="14">impact rings</text>
+    <text x="420" y="314">/insights</text><text x="520" y="314" font-family="Inter Tight, -apple-system, Helvetica, Arial, sans-serif" font-size="14">reads-as-AI scan</text>
+    <text x="420" y="338">/ideas</text><text x="520" y="338" font-family="Inter Tight, -apple-system, Helvetica, Arial, sans-serif" font-size="14">angles to write</text>
+    <text x="420" y="362">/memory</text><text x="520" y="362" font-family="Inter Tight, -apple-system, Helvetica, Arial, sans-serif" font-size="14">what it knows</text>
+    <text x="420" y="386">/feed</text><text x="520" y="386" font-family="Inter Tight, -apple-system, Helvetica, Arial, sans-serif" font-size="14">every decision</text>
+  </g>
+  <text x="420" y="430" font-size="12" class="s">flow/decide.py: one Jev payload per decision</text>
+
+  <!-- browser <-> server -->
+  <path d="M290 260 L396 260" class="arrow"/>
+  <path d="M396 320 L294 320" class="arrow"/>
+  <text x="343" y="250" text-anchor="middle" font-size="12" class="s">draft</text>
+  <text x="343" y="340" text-anchor="middle" font-size="12" class="s">what to show</text>
+
+  <!-- Jev -->
+  <rect x="850" y="120" width="310" height="140" class="box" style="stroke:#F386A1;stroke-width:3"/>
+  <text x="870" y="152" font-size="18" font-weight="600" class="t">Jev · the judge</text>
+  <text x="870" y="176" font-size="12.5" class="mono s">typesafe:jev-latest</text>
+  <text x="870" y="204" font-size="14" class="t">answers yes/no and pick-one</text>
+  <text x="870" y="224" font-size="14" class="t">questions with probabilities,</text>
+  <text x="870" y="244" font-size="14" class="t">in about half a second</text>
+
+  <!-- MLX -->
+  <rect x="850" y="300" width="310" height="120" class="box"/>
+  <text x="870" y="332" font-size="18" font-weight="600" class="t">Local MLX model</text>
+  <text x="870" y="356" font-size="12.5" class="mono s">Qwen3 4B · 127.0.0.1:8085</text>
+  <text x="870" y="384" font-size="14" class="t">writes candidates only: notes,</text>
+  <text x="870" y="404" font-size="14" class="t">rewrites, emoji, titles, angles</text>
+
+  <!-- server -> models -->
+  <path d="M740 200 L846 190" class="arrow" style="stroke:#F386A1;marker-end:url(#headp)"/>
+  <text x="792" y="182" text-anchor="middle" font-size="12" class="s">decide</text>
+  <path d="M740 360 L846 360" class="arrow"/>
+  <text x="792" y="352" text-anchor="middle" font-size="12" class="s">propose</text>
+
+  <!-- memory + mirror -->
+  <rect x="400" y="490" width="340" height="50" class="box"/>
+  <text x="416" y="512" font-size="13" font-weight="600" class="t">Memory</text>
+  <text x="416" y="530" font-size="12" class="mono s">~/.jevflow/memory · a git repo of facts</text>
+  <path d="M570 460 L570 486" class="arrow"/>
+
+  <rect x="850" y="450" width="310" height="90" class="box"/>
+  <text x="870" y="478" font-size="13" font-weight="600" class="t">Mirror</text>
+  <text x="870" y="498" font-size="12.5" class="t">a question bank asked through Jev,</text>
+  <text x="870" y="518" font-size="12.5" class="t">stacked into P(reads as AI) + reasons</text>
+  <path d="M740 440 L846 480" class="arrow"/>
+</svg>

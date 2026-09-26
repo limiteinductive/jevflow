@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="440" viewBox="0 0 1200 440" font-family="Inter Tight, -apple-system, 'Helvetica Neue', Arial, sans-serif">
+  <defs>
+    <style>
+      .mono { font-family: 'JetBrains Mono', 'SF Mono', Menlo, monospace; }
+      .t { fill: #1E1E1E; }
+      .s { fill: #3C2D30; }
+      .box { fill: #FEFEFE; stroke: #1E1E1E; stroke-width: 2; }
+      .arrow { stroke: #1E1E1E; stroke-width: 2; fill: none; marker-end: url(#head); }
+    </style>
+    <marker id="head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1E1E1E"/>
+    </marker>
+  </defs>
+  <rect width="1200" height="440" fill="#FEFEFE"/>
+
+  <text x="40" y="52" font-size="26" font-weight="600" class="t">You type one stream. jevflow sorts it.</text>
+  <text x="40" y="80" font-size="15" class="s">No modes, no chat box. Each sentence is weighed as you finish it.</text>
+
+  <!-- the stream -->
+  <rect x="40" y="120" width="560" height="280" class="box"/>
+  <text x="60" y="150" font-size="12" class="mono s">what you type</text>
+  <g font-size="17">
+    <rect x="56" y="170" width="528" height="34" fill="#F386A1" fill-opacity="0.22"/>
+    <text x="66" y="193" class="t">im writing a launch post for engineers, keep it calm</text>
+
+    <rect x="56" y="222" width="528" height="58" fill="#DEDEDE" fill-opacity="0.6"/>
+    <text x="66" y="245" class="t">Our CI went from 40 minutes to 4 after we cached</text>
+    <text x="66" y="270" class="t">the Docker layers. One flag did it.</text>
+
+    <rect x="56" y="298" width="528" height="34" fill="#1E1E1E"/>
+    <text x="66" y="321" fill="#FEFEFE">should I lead with the numbers? wdyt</text>
+
+    <rect x="56" y="350" width="528" height="34" fill="none" stroke="#1E1E1E" stroke-dasharray="4 4"/>
+    <text x="66" y="373" class="t">ok do that</text>
+  </g>
+
+  <!-- destinations -->
+  <g>
+    <rect x="720" y="120" width="440" height="70" class="box"/>
+    <rect x="720" y="120" width="8" height="70" fill="#F386A1"/>
+    <text x="744" y="148" font-size="16" font-weight="600" class="t">a note → the header</text>
+    <text x="744" y="172" font-size="13" class="mono s">Goal · Audience · Tone · To do</text>
+
+    <rect x="720" y="210" width="440" height="70" class="box"/>
+    <rect x="720" y="210" width="8" height="70" fill="#DEDEDE"/>
+    <text x="744" y="238" font-size="16" font-weight="600" class="t">your text → stays yours</text>
+    <text x="744" y="262" font-size="13" class="s">small fixes only if they keep meaning and voice</text>
+
+    <rect x="720" y="300" width="440" height="100" class="box"/>
+    <rect x="720" y="300" width="8" height="100" fill="#1E1E1E"/>
+    <text x="744" y="328" font-size="16" font-weight="600" class="t">a question → a margin comment</text>
+    <text x="744" y="352" font-size="13" class="s">Jev picks the answer. Your reply ("ok do that")</text>
+    <text x="744" y="372" font-size="13" class="s">applies the rewrite, if Jev accepts it.</text>
+  </g>
+
+  <path d="M600 187 L716 155" class="arrow"/>
+  <path d="M600 251 L716 245" class="arrow"/>
+  <path d="M600 315 L716 335" class="arrow"/>
+  <path d="M600 367 L716 365" class="arrow"/>
+</svg>
