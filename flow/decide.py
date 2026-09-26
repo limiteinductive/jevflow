@@ -44,6 +44,11 @@ FIX_THRESHOLD = 0.7
 """Every fix question must reach this; a real spelling fix scores at least 0.90 on all four and an unchanged sentence 0.00 on `real_mistake`."""
 HURTS_THRESHOLD = 0.7
 """A sentence gets a goal suggestion when Jev's P(it makes the text less of a Goal category) reaches this."""
+OPTION_INSTRUCTIONS = "A writer asks an open question about a part of their draft. Reply with 2 to 4 short possible answers, one per line, each 1 to 4 plain words. Reply with the list only."
+OPTION_EXAMPLES = [("Text: the launch slipped again, as expected\nQuestion: how does this come across?", "neutral\nfrustrated\npassive-aggressive")]
+MAX_OPTIONS = 4
+OPTION_FIT = 0.5
+"""The options are shown only when Jev's P(one of them answers the question) reaches this; otherwise the question gets a one-line reply."""
 NOTE_CONTEXT = "A writer types their text and, in the same stream, notes to a writing assistant such as 'make this punchier', 'this is for engineers', 'im writing a blog post', 'replying to my boss about friday' or 'undo'."
 
 YesNo = Literal["yes", "no"]
@@ -112,6 +117,10 @@ class ComponentReply:
     """The coworker's reply when the writer asked an open question about the component."""
     probability: float | None
     """Jev's P(yes) on the writer's own question when it is a yes/no question."""
+    options: list[str] | None
+    """The local model's short answers to an open question about a copied span, when Jev says one of them fits."""
+    pick: str | None
+    """The option Jev chose."""
 
 
 @dataclass(frozen=True)
@@ -426,15 +435,38 @@ async def about_component(span: str, question: str, component: str, text: str, s
         __doc__=f"A writer pasted a reference to a part of their writing assistant's page into their draft. That part: {component}. They typed: '{span}'.",
         intent=(ComponentIntent, Field(description="yes_no: they ask a yes or no question about that part; question: they ask an open question about it; instruction: they ask to change, drop, forget or mark it done; mention: it is part of the text they are writing.")),
     )
-    intent, reply, probed = await asyncio.gather(
-        run(Intent, f"Typed: {span}"), answer(sentence or paragraph, paragraph, f"{span} ({component})", goal, memory), probe(question, text) if text else asyncio.sleep(0, None)
+    intent, reply, probed, picked = await asyncio.gather(
+        run(Intent, f"Typed: {span}"),
+        answer(sentence or paragraph, paragraph, f"{span} ({component})", goal, memory),
+        probe(question, text) if text else asyncio.sleep(0, None),
+        pick_option(question, text) if text else asyncio.sleep(0, None),
     )
     probing = intent["intent"] == "yes_no" and probed is not None
     feed.act(intent, "applied", "intent")
     if probed is not None:
         feed.act(probed, "shown" if probing else "silent", "answer")
-    asks = intent["intent"] in ("question", "yes_no") and not probing
-    return ComponentReply(intent["intent"], reply if asks else None, probed["answer"] if probing else None)
+    choosing = intent["intent"] == "question" and picked is not None
+    asks = intent["intent"] in ("question", "yes_no") and not probing and not choosing
+    options, pick = picked if choosing else (None, None)
+    return ComponentReply(intent["intent"], reply if asks else None, probed["answer"] if probing else None, options, pick)
+
+
+async def pick_option(question: str, text: str) -> tuple[list[str], str] | None:
+    """The local model's short answers to the writer's open `question` about `text` and the one Jev picks, or None when Jev says none of them answers it."""
+    reply = await generator.chat(OPTION_INSTRUCTIONS, OPTION_EXAMPLES, f"Text: {text}\nQuestion: {question}", 40)
+    options = list(dict.fromkeys(filter(None, (line.strip(" -*\u2022.").lower() for line in reply.splitlines()))))[:MAX_OPTIONS]
+    if len(options) < 2:
+        return None
+    OptionPick = create_model(
+        "OptionPick",
+        __doc__=f"A writer asks an open question about a part of their draft: {text}",
+        pick=(Literal[tuple(options)], Field(description=question)),
+        fits=(YesNo, Field(description=f"Does one of these answer '{question}': {'; '.join(options)}?")),
+    )
+    check = await run(OptionPick, f"Text: {text}\n\nQuestion: {question}")
+    fits = check["fits"] >= OPTION_FIT
+    feed.act(check, "shown" if fits else "dropped", "pick", "fits")
+    return (options, check["pick"]) if fits else None
 
 
 async def probe(question: str, text: str) -> dict[str, float | str]:
