@@ -59,6 +59,8 @@ class Reply(BaseModel):
 
 class ComponentNote(BaseModel):
     span: str
+    question: str
+    """`span` without the pasted reference."""
     component: str
     """The clicked component's data and visible text, as the page snapshotted them."""
     sentence: str
@@ -122,7 +124,19 @@ async def revise(reply: Reply) -> dict:
 
 @app.post("/component")
 async def component(note: ComponentNote) -> dict:
-    return asdict(await decide.about_component(note.span, note.component, note.sentence, note.paragraph, note.goal, memory.context()))
+    return asdict(await decide.about_component(note.span, note.question, note.component, note.sentence, note.paragraph, note.goal, memory.context()))
+
+
+class Probe(BaseModel):
+    question: str
+    text: str
+
+
+@app.post("/probe")
+async def probe(probe: Probe) -> dict:
+    answers = await decide.probe(probe.question, probe.text)
+    feed.act(answers, "shown", "answer")
+    return {"probability": answers["answer"]}
 
 
 @app.post("/fixes")
