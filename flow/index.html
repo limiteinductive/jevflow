@@ -483,9 +483,19 @@ function suggest(suggestions) {
   };
 }
 
-async function post(path, body) {
-  const response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json", "X-Pause": `${PAGE_LOAD} ${inputs}` }, body: JSON.stringify(body) });
-  return response.json();
+const lastRequests = new Map();
+
+function post(path, body) {
+  const serialized = JSON.stringify(body);
+  const last = lastRequests.get(path);
+  if (last && last.serialized === serialized) return last.result;
+  const result = fetch(path, { method: "POST", headers: { "Content-Type": "application/json", "X-Pause": `${PAGE_LOAD} ${inputs}` }, body: serialized }).then((response) => {
+    if (!response.ok) throw new Error(`${path} ${response.status}`);
+    return response.json();
+  });
+  result.catch(() => { if (lastRequests.get(path)?.result === result) lastRequests.delete(path); });
+  lastRequests.set(path, { serialized, result });
+  return result;
 }
 
 function replaceAll(text, caret) {
