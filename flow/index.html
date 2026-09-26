@@ -200,19 +200,19 @@ async function openThread(anchor, question) {
 async function replyToThread(reply) {
   const replied = thread;
   thread.reply = reply;
-  thread.status = "Rewriting…";
+  thread.status = "rewriting…";
   render();
   const result = await post("/revise", { sentence: thread.anchor.text, comment: thread.answer, reply });
   if (thread !== replied) return;
   if (!result.replacement || !stillThere(thread.anchor)) {
-    thread.status = "Kept your sentence.";
+    thread.status = "leaving your sentence as is.";
     render();
     return;
   }
   const { start, end } = thread.anchor;
   applyEdit(start, end, result.replacement, `revise ${thread.anchor.text} ${result.replacement}`);
   thread.anchor = { start, end: start + result.replacement.length, text: result.replacement };
-  thread.status = "Applied. Undo reverts it.";
+  thread.status = "done ✅ undo puts it back";
   const flash = { ...thread.anchor };
   flashes.push(flash);
   setTimeout(() => { flashes = flashes.filter((other) => other !== flash); render(); }, FLASH_MS);
