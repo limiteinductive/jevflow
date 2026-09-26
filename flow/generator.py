@@ -43,6 +43,7 @@ VOICE = (
     "Write one short lowercase line: the verdict and the one fix. "
     "Your first words carry the answer: no preamble, no praise of the question, no restating it. "
     "Give the exact words to use, then at most a two word question that offers to make the change. "
+    "When they ask for several ideas or options, give that many on the same line, numbered 1) 2) 3), and name your pick. "
     "Say plainly what you are not sure of and what you leave alone. A note the writer did not ask for starts with 'heads up:'. "
     "Match the writer's register: loose on a casual post, calm and warm on a personal note. "
     "Use at most one emoji, usually none, and no dashes. "
@@ -66,6 +67,10 @@ ANSWER_EXAMPLES = [
     (
         "Goal: a text to my wife\nParagraph: sorry i was short with you this morning, the deploy was a mess\nLast sentence: sorry i was short with you this morning, the deploy was a mess\nQuestion: does this sound ok?",
         "1. warm, owns it. end on her: \"you didn't deserve that.\" add it?\n2. it's fine as is. sending it matters more than the words.\n3. drop the deploy: \"sorry i was short with you this morning.\" swap it?",
+    ),
+    (
+        "Goal: a short story\nParagraph: He never called back.\nLast sentence: He never called back.\nQuestion: give me three ideas for the ending",
+        "1. 1) she deletes his number. 2) the phone rings, she lets it. 3) she calls her sister instead. i'd take 2.\n2. 1) he shows up at her door. 2) she finds his last voicemail. 3) she stops checking. i'd take 3.\n3. 1) a letter comes a year later. 2) she moves out. 3) she calls him. i'd take 1.",
     ),
     (
         "Goal: an x post\nParagraph: our smol team shipped it anyway\nLast sentence: our smol team shipped it anyway\nQuestion: does this land?",
