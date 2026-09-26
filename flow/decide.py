@@ -6,9 +6,10 @@ Every decision is one Jev request with all its questions in one payload.
 import asyncio
 import difflib
 import math
+from collections.abc import Awaitable, Callable
 from itertools import pairwise
 from dataclasses import dataclass, replace
-from typing import Literal
+from typing import Literal, TypeVar
 
 from pydantic import BaseModel, Field, create_model
 from pydantic_ai import Agent
@@ -163,13 +164,13 @@ class Suggestion:
 agent = Agent(MODEL)
 """One agent for every decision: a fresh agent per call opens a new connection and adds about 0.4 s."""
 
-sentence_notes: dict[tuple[str, str, str, frozenset[str]], SentenceNote | None] = {}
+sentence_notes: dict[tuple[str, str, str, frozenset[str]], asyncio.Task[SentenceNote | None]] = {}
 """Decisions by sentence text; the page asks about the whole draft on every pause, so each sentence is decided once."""
 
 meta_sentences: dict[str, float] = {}
 """P(the sentence is addressed to the assistant rather than part of the text), by sentence; filled by the note gate."""
 
-sentence_fixes: dict[tuple[str, str], tuple[str | None, GoalSuggestion | None]] = {}
+sentence_fixes: dict[tuple[str, str], asyncio.Task[tuple[str | None, GoalSuggestion | None]]] = {}
 """Jev-accepted correction and goal suggestion by sentence text and Goal, decided once per pair like `sentence_notes`."""
 
 
@@ -181,6 +182,21 @@ def line_sentences(text: str, breaks: list[int]) -> list[Sentence]:
         for chunk_start, chunk_end in pairwise(positions)
         for sentence in split_sentences(text[chunk_start:chunk_end])
     ]
+
+
+Key = TypeVar("Key")
+Result = TypeVar("Result")
+
+
+async def once(cache: dict[Key, asyncio.Task[Result]], key: Key, decide: Callable[[], Awaitable[Result]]) -> Result:
+    """`decide()` run once per `key`: a pause that asks while an earlier pause is still deciding waits on the same task instead of asking the local model and Jev again.
+
+    A task that fails leaves the cache, so a later pause retries it; the shield keeps one request's disconnect from cancelling the task other requests wait on.
+    """
+    if key not in cache:
+        task = cache[key] = asyncio.create_task(decide())
+        task.add_done_callback(lambda done: cache.pop(key, None) if done.cancelled() or done.exception() else None)
+    return await asyncio.shield(cache[key])
 
 
 async def run(output_type: type[BaseModel], prompt: str) -> dict[str, float | str]:
@@ -325,12 +341,11 @@ def meta_spans(sentences: list[Sentence]) -> list[Sentence]:
 async def find_notes(text: str, comment: str, breaks: list[int], goal: str, enabled: frozenset[str]) -> list[Note]:
     """At most one note per sentence, located by character offsets in `text`; `comment` is the coworker's open comment and `goal` the Goal header, each possibly empty."""
     sentences = line_sentences(text, breaks)
-    fresh = list(dict.fromkeys(sentence.text.rstrip(".") for sentence in sentences if (sentence.text.rstrip("."), comment, goal, enabled) not in sentence_notes))
-    for sentence, decision in zip(fresh, await asyncio.gather(*(decide_note(sentence, comment, goal, enabled) for sentence in fresh))):
-        sentence_notes[sentence, comment, goal, enabled] = decision
+    keys = list(dict.fromkeys(sentence.text.rstrip(".") for sentence in sentences))
+    decided = dict(zip(keys, await asyncio.gather(*(once(sentence_notes, (key, comment, goal, enabled), lambda key=key: decide_note(key, comment, goal, enabled)) for key in keys))))
     notes = []
     for sentence in sentences:
-        decision = sentence_notes[sentence.text.rstrip("."), comment, goal, enabled]
+        decision = decided[sentence.text.rstrip(".")]
         if decision is None:
             continue
         start = text.find(decision.text, sentence.start)
@@ -440,14 +455,13 @@ async def find_fixes(text: str, limit: int, goal: str, categories: list[str]) ->
     sentences = [
         sentence for sentence in line_sentences(text, []) if sentence.start + len(sentence.text) <= limit and text.startswith(sentence.text, sentence.start)
     ]
-    fresh = list(dict.fromkeys(sentence.text for sentence in sentences if (sentence.text, goal) not in sentence_fixes))
     ends = {sentence.text: sentence.start + len(sentence.text) for sentence in sentences}
-    decisions = await asyncio.gather(*(decide_fix(sentence, text[max(0, ends[sentence] - TIMING_CONTEXT_CHARS):ends[sentence]], goal, categories) for sentence in fresh))
-    for sentence, decision in zip(fresh, decisions):
-        sentence_fixes[sentence, goal] = decision
+    decided = dict(zip(ends, await asyncio.gather(*(
+        once(sentence_fixes, (key, goal), lambda key=key: decide_fix(key, text[max(0, ends[key] - TIMING_CONTEXT_CHARS):ends[key]], goal, categories)) for key in ends
+    ))))
     fixes, suggestions = [], []
     for sentence in sentences:
-        replacement, suggestion = sentence_fixes[sentence.text, goal]
+        replacement, suggestion = decided[sentence.text]
         end = sentence.start + len(sentence.text)
         if replacement is not None:
             fixes.append(Fix(sentence.start, end, sentence.text, replacement))
