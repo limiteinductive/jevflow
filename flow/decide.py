@@ -4,6 +4,7 @@ Every decision is one Jev request with all its questions in one payload.
 """
 
 import asyncio
+from itertools import pairwise
 from dataclasses import dataclass, replace
 from typing import Literal
 
@@ -94,12 +95,15 @@ sentence_fixes: dict[str, str | None] = {}
 """Jev-accepted replacements by sentence text, decided once per sentence like `sentence_notes`."""
 
 
-def line_sentences(text: str) -> list[Sentence]:
-    """Sentences with offsets in `text`, never spanning a line break: the page treats a newline as the end of a sentence."""
-    sentences, line_start = [], 0
-    for line in text.split("\n"):
-        sentences += [replace(sentence, start=line_start + sentence.start, end=line_start + sentence.end) for sentence in split_sentences(line)]
-        line_start += len(line) + 1
+def line_sentences(text: str, breaks: list[int]) -> list[Sentence]:
+    """Sentences with offsets in `text`, never spanning a line break or an offset in `breaks`: the page ends a sentence at a newline and at a comment thread's anchor."""
+    sentences = []
+    positions = [0, *sorted(position for position in breaks if 0 < position < len(text)), len(text)]
+    for chunk_start, chunk_end in pairwise(positions):
+        line_start = chunk_start
+        for line in text[chunk_start:chunk_end].split("\n"):
+            sentences += [replace(sentence, start=line_start + sentence.start, end=line_start + sentence.end) for sentence in split_sentences(line)]
+            line_start += len(line) + 1
     return sentences
 
 
@@ -117,10 +121,10 @@ async def decide_note(sentence: str, comment: str) -> SentenceNote | None:
 
     When the copied words fail the check, the sentence is a note only if Jev reads all of it as one; a header that fails is replaced by the note words.
     """
-    reply = {"reply": (YesNo, Field(description=f"Is the sentence the writer's reply to the coworker's comment '{comment}'?"))} if comment else {}
+    reply = {"reply": (YesNo, Field(description="Is the writer answering the coworker's comment (agreeing, disagreeing, correcting it or asking for the change) rather than writing the text?"))} if comment else {}
     NoteGate = create_model(
         "NoteGate",
-        __doc__=NOTE_CONTEXT,
+        __doc__=NOTE_CONTEXT + (f" The writer's coworker just commented on the draft: '{comment}'" if comment else ""),
         plan=(YesNo, Field(description="Is the sentence the writer's plan or intent for the text, rather than part of the text itself?")),
         asks=(YesNo, Field(description="Is the writer asking the assistant for its opinion or help?")),
         is_question=(YesNo, Field(description="Is the sentence a question?")),
@@ -175,9 +179,9 @@ async def question_span(sentence: str, question: str) -> str:
     return question if check["whole_question"] >= NOTE_THRESHOLD else sentence
 
 
-async def find_notes(text: str, comment: str) -> list[Note]:
+async def find_notes(text: str, comment: str, breaks: list[int]) -> list[Note]:
     """At most one note per sentence, located by character offsets in `text`; `comment` is the coworker's open comment, or empty."""
-    sentences = line_sentences(text)
+    sentences = line_sentences(text, breaks)
     fresh = list(dict.fromkeys(sentence.text.rstrip(".") for sentence in sentences if (sentence.text.rstrip("."), comment) not in sentence_notes))
     for sentence, decision in zip(fresh, await asyncio.gather(*(decide_note(sentence, comment) for sentence in fresh))):
         sentence_notes[sentence, comment] = decision
@@ -212,7 +216,7 @@ async def decide_fix(sentence: str) -> str | None:
 async def find_fixes(text: str, limit: int) -> list[Fix]:
     """Accepted corrections for the sentences that end at or before `limit`, the start of the sentence being typed."""
     sentences = [
-        sentence for sentence in line_sentences(text) if sentence.start + len(sentence.text) <= limit and text.startswith(sentence.text, sentence.start)
+        sentence for sentence in line_sentences(text, []) if sentence.start + len(sentence.text) <= limit and text.startswith(sentence.text, sentence.start)
     ]
     fresh = list(dict.fromkeys(sentence.text for sentence in sentences if sentence.text not in sentence_fixes))
     for sentence, replacement in zip(fresh, await asyncio.gather(*(decide_fix(sentence) for sentence in fresh))):
@@ -258,13 +262,20 @@ async def answer(sentence: str, paragraph: str, question: str, goal: str) -> Ans
     return Answer(ranked[0][2], measures, meta["scope"])
 
 
-async def revise(sentence: str, comment: str) -> str | None:
-    """`sentence` rewritten to do what the coworker's `comment` suggests, when Jev says the rewrite does it and keeps every fact and the voice."""
-    replacement = await generator.revise(sentence, comment)
+async def revise(sentence: str, comment: str, reply: str) -> str | None:
+    """`sentence` rewritten as the writer's `reply` to the coworker's `comment` asks, when Jev says the writer wants a change and the rewrite does it, keeps every fact and the voice."""
+    Wants = create_model(
+        "Wants",
+        __doc__=f"A coworker commented on a writer's sentence. Sentence: '{sentence}'. Comment: '{comment}'. The writer replied: '{reply}'.",
+        wants_change=(YesNo, Field(description="Does the writer's reply ask for the sentence to be changed?")),
+    )
+    wants, replacement = await asyncio.gather(run(Wants, f"Reply: {reply}"), generator.revise(sentence, comment, reply))
+    if wants["wants_change"] < NOTE_GATE:
+        return None
     ReviseCheck = create_model(
         "ReviseCheck",
-        __doc__=f"A coworker commented on a writer's sentence and rewrote it. Sentence: '{sentence}'. Comment: '{comment}'. Rewrite: '{replacement}'.",
-        follows=(YesNo, Field(description="Does the rewrite do what the comment suggests?")),
+        __doc__=f"A coworker commented on a writer's sentence, the writer replied, and the coworker rewrote it. Sentence: '{sentence}'. Comment: '{comment}'. Reply: '{reply}'. Rewrite: '{replacement}'.",
+        follows=(YesNo, Field(description="Does the rewrite do what the writer's reply asks, following the comment where the reply agrees with it?")),
         keeps_facts=(YesNo, Field(description="Does the rewrite keep every fact the sentence states? Adding what the comment asks for is fine.")),
         same_voice=(YesNo, Field(description="Does the rewrite still sound like the writer?")),
         only_text=(YesNo, Field(description="Is the rewrite only text the writer would send, with no advice, commentary or formatting marks in it?")),

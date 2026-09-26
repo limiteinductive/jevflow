@@ -32,6 +32,8 @@ class CommentedDraft(BaseModel):
     text: str
     comment: str
     """The coworker's open comment, or empty; a sentence can be a reply to it."""
+    breaks: list[int]
+    """Offsets where a sentence must end even without punctuation: the end of the open thread's anchor."""
 
 
 class Question(BaseModel):
@@ -45,6 +47,7 @@ class Question(BaseModel):
 class Reply(BaseModel):
     sentence: str
     comment: str
+    reply: str
 
 
 class TypedDraft(BaseModel):
@@ -83,7 +86,7 @@ async def log_decisions(request: Request, call_next):
 
 @app.post("/notes")
 async def notes(draft: CommentedDraft) -> dict:
-    return {"notes": [asdict(note) for note in await decide.find_notes(draft.text, draft.comment)]}
+    return {"notes": [asdict(note) for note in await decide.find_notes(draft.text, draft.comment, draft.breaks)]}
 
 
 @app.post("/answer")
@@ -93,7 +96,7 @@ async def answer(question: Question) -> dict:
 
 @app.post("/revise")
 async def revise(reply: Reply) -> dict:
-    return {"replacement": await decide.revise(reply.sentence, reply.comment)}
+    return {"replacement": await decide.revise(reply.sentence, reply.comment, reply.reply)}
 
 
 @app.post("/fixes")

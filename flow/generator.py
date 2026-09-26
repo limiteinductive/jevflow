@@ -38,13 +38,13 @@ ANSWER_EXAMPLES = [
     )
 ]
 REVISE_INSTRUCTIONS = (
-    "Rewrite the writer's sentence to do what the coworker's comment suggests. "
+    "Rewrite the writer's sentence to do what the writer's reply asks, following the coworker's comment where the reply agrees with it. "
     "Keep every fact, the writer's words where possible, their slang and their joke. "
     "Reply with the rewritten text only, as the writer would send it: no advice, no quotes, no markdown."
 )
 REVISE_EXAMPLES = [
     (
-        "Sentence: turns out my cat was right about the vacuum all along\nComment: Readers don't know what your cat thought: say it hid from the vacuum for years, then land the joke.",
+        "Sentence: turns out my cat was right about the vacuum all along\nComment: Readers don't know what your cat thought: say it hid from the vacuum for years, then land the joke.\nWriter's reply: ok add that",
         "my cat hid from the vacuum for years. turns out she was right all along",
     )
 ]
@@ -97,8 +97,8 @@ async def answer(sentence: str, paragraph: str, question: str, goal: str, seed: 
     return await chat(ANSWER_INSTRUCTIONS, ANSWER_EXAMPLES, f"Goal: {goal}\nParagraph: {paragraph}\nLast sentence: {sentence}\nQuestion: {question}", 60, 0.9, seed)
 
 
-async def revise(sentence: str, comment: str) -> str:
-    return await chat(REVISE_INSTRUCTIONS, REVISE_EXAMPLES, f"Sentence: {sentence}\nComment: {comment}", 2 * len(sentence.split()) + 40)
+async def revise(sentence: str, comment: str, reply: str) -> str:
+    return await chat(REVISE_INSTRUCTIONS, REVISE_EXAMPLES, f"Sentence: {sentence}\nComment: {comment}\nWriter's reply: {reply}", 2 * len(sentence.split()) + 40)
 
 
 async def extract_question(sentence: str) -> str:

@@ -199,17 +199,17 @@ async function replyToThread(reply) {
   thread.reply = reply;
   thread.status = "Rewriting…";
   render();
-  const result = await post("/revise", { sentence: thread.anchor.text, comment: thread.answer });
+  const result = await post("/revise", { sentence: thread.anchor.text, comment: thread.answer, reply });
   if (thread !== replied) return;
   if (!result.replacement || !stillThere(thread.anchor)) {
-    thread.status = "Kept your sentence: the rewrite did not pass Jev's check.";
+    thread.status = "Kept your sentence.";
     render();
     return;
   }
   const { start, end } = thread.anchor;
   applyEdit(start, end, result.replacement, `revise ${thread.anchor.text} ${result.replacement}`);
   thread.anchor = { start, end: start + result.replacement.length, text: result.replacement };
-  thread.status = "Applied. Cmd+Z or type undo to revert.";
+  thread.status = "Applied. Undo reverts it.";
   const flash = { ...thread.anchor };
   flashes.push(flash);
   setTimeout(() => { flashes = flashes.filter((other) => other !== flash); render(); }, FLASH_MS);
@@ -308,7 +308,8 @@ async function findNotes() {
   if (!text.trim()) return;
   const request = ++notesRequest;
   const comment = thread && thread.answer && !thread.reply ? thread.answer : "";
-  const result = await post("/notes", { text, comment });
+  const breaks = thread && stillThere(thread.anchor) ? [thread.anchor.end] : [];
+  const result = await post("/notes", { text, comment, breaks });
   if (request !== notesRequest || editor.value !== text) return;
   notes = result.notes;
   liftNotes();
