@@ -23,7 +23,7 @@ KEEP_THRESHOLD = 0.7
 RELEVANT_THRESHOLD = 0.5
 MAX_RECALLED = 4
 MAX_DRAFT_CHARS = 600
-REF_TOKEN = re.compile(r"@(?:\"[^\"\n]*\"|[\w-]+)")
+REF_TOKEN = re.compile(r"(?<![\w.])@(?:\"[^\"\n]*\"|[\w-]+)")
 """A sentence holding a component token is the page's refs flow to read, so the pause leaves it out."""
 FACT_INSTRUCTIONS = (
     "The user message is a sentence a writer typed; it holds a lasting fact or preference about the writer. Reply with three lines. "
