@@ -13,7 +13,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, create_model
 from pydantic_ai import Agent
 
-from flow import components, feed, generator, reactions
+from flow import claims, components, feed, generator, reactions
 from text_processing import Sentence, split_sentences
 
 MODEL = "typesafe:jev-latest"
@@ -47,6 +47,16 @@ HURTS_THRESHOLD = 0.7
 """A sentence gets a goal suggestion when Jev's P(it makes the text less of a Goal category) reaches this."""
 OPTION_INSTRUCTIONS = "A writer asks an open question about a part of their draft. Reply with 2 to 4 short possible answers, one per line, each 1 to 4 plain words. Reply with the list only."
 OPTION_EXAMPLES = [("Text: the launch slipped again, as expected\nQuestion: how does this come across?", "neutral\nfrustrated\npassive-aggressive")]
+HEADER_EDIT_INSTRUCTIONS = (
+    "A writer's draft has a header field with entries, one per line. Rewrite the entries as the writer's comment asks, changing only what it asks for, and drop an entry the comment asks to drop. "
+    "One entry per line, as short as the originals. Reply with the list only."
+)
+HEADER_EDIT_EXAMPLES = [
+    ("Field: Goal\nEntries:\nx post\n50% objective\n\nComment: drop the 50% part", "x post"),
+    ("Field: Goal\nEntries:\nx post\n\nComment: make it a linkedin post", "linkedin post"),
+]
+HEADER_EDIT_THRESHOLD = 0.6
+"""An edited header list replaces the old one only when both of Jev's checks reach this."""
 MAX_OPTIONS = 4
 PERCENT = re.compile(r"(\d{1,3})\s*%")
 OPTION_FIT = 0.5
@@ -165,6 +175,9 @@ agent = Agent(MODEL)
 sentence_notes: dict[tuple[str, str, str, frozenset[str]], SentenceNote | None] = {}
 """Decisions by sentence text; the page asks about the whole draft on every pause, so each sentence is decided once."""
 
+meta_sentences: dict[str, float] = {}
+"""P(the sentence is addressed to the assistant rather than part of the text), by sentence; filled by the note gate."""
+
 sentence_fixes: dict[tuple[str, str], tuple[str | None, GoalSuggestion | None]] = {}
 """Jev-accepted correction and goal suggestion by sentence text and Goal, decided once per pair like `sentence_notes`."""
 
@@ -203,18 +216,23 @@ async def decide_note(sentence: str, comment: str, goal: str, enabled: frozenset
         is_question=(YesNo, Field(description="Is the sentence a question?")),
         field=(HeaderField, Field(description="What is the note about? goal: what the writer is writing; audience: who it is for; tone: how it should sound; to_do: something to add, check or change; undo: asks to undo the last edit.")),
         for_whom=(YesNo, Field(description="Does the sentence also say who the text is for?")),
+        for_assistant=(YesNo, Field(description="Is the sentence addressed to the writing assistant (a comment, reply, question or instruction to it), rather than part of the text the writer is writing?")),
         find_page=(YesNo, Field(description="Does the writer ask about something they wrote before, rather than about this text?")),
         open_page=(YesNo, Field(description="Is the sentence a command to switch to another page, like 'open the tacos one' or 'take me to my essay'?")),
         **reply,
         **new_piece,
         **components.fields(),
         **(reactions.fields(goal) if "reactions" in enabled else {}),
+        **(claims.fields(goal) if "claims" in enabled else {}),
     )
     gate, (note, header), question, audience = await asyncio.gather(
         run(NoteGate, f"Sentence: {sentence}"), generator.extract_note(sentence), generator.extract_question(sentence), generator.extract_audience(sentence)
     )
     if "reactions" in enabled:
         reactions.record(sentence, goal, gate)
+    meta_sentences[sentence] = gate["for_assistant"]
+    if "claims" in enabled:
+        claims.record(sentence, goal, gate)
     if components.record(sentence, gate):
         return None
     if gate.get("reply", 0) >= NOTE_GATE:
@@ -261,7 +279,11 @@ async def decide_note(sentence: str, comment: str, goal: str, enabled: frozenset
 
     if field == "new_page":
         header_check = await run(HeaderCheck, f"Note: {note}\n\nHeader: {header}")
-        return SentenceNote(sentence, probability, field, headers("goal", sentence))
+        seeded = headers("goal", sentence)
+        print(f"new_page: {sentence!r} P={probability:.2f} goal={goal!r} seeds={[header.text for header in seeded]}", flush=True)
+        if any(header.field == "goal" and header.text.strip().lower() == goal.strip().lower() for header in seeded):
+            return None
+        return SentenceNote(sentence, probability, field, seeded)
     check, header_check = await asyncio.gather(run(NoteCheck, f"Sentence: {sentence}"), run(HeaderCheck, f"Note: {note}\n\nHeader: {header}"))
     if note not in sentence or min(check["only_note"], check["whole_note"]) < NOTE_THRESHOLD:
         if check["sentence_only_note"] < NOTE_THRESHOLD:
@@ -306,6 +328,11 @@ async def timing(text: str) -> Timing:
     moment = await run(Moment, f"Draft end: {text[-TIMING_CONTEXT_CHARS:]}")
     feed.act(moment, "applied" if moment["mid_thought"] < MID_THOUGHT_GATE and moment["interrupt"] >= INTERRUPT_GATE else "silent", "mid_thought", "interrupt")
     return Timing(moment["mid_thought"], moment["interrupt"])
+
+
+def meta_spans(sentences: list[Sentence]) -> list[Sentence]:
+    """The sentences Jev reads as addressed to the assistant, which every judge of the text skips."""
+    return [sentence for sentence in sentences if meta_sentences.get(sentence.text.rstrip("."), 0) >= NOTE_GATE]
 
 
 async def find_notes(text: str, comment: str, breaks: list[int], goal: str, enabled: frozenset[str]) -> list[Note]:
@@ -522,3 +549,21 @@ async def probe(question: str, text: str) -> dict[str, float | str]:
     """Jev's answers with P(yes) on the writer's own yes/no `question` about `text` under "answer"."""
     Probe = create_model("Probe", __doc__=f"A writer asks a yes or no question about a part of their draft: {text}", answer=(YesNo, Field(description=question)))
     return await run(Probe, f"Text: {text}\n\nQuestion: {question}")
+
+
+async def edit_header(field: str, entries: list[str], comment: str) -> list[str] | None:
+    """`entries` of the header `field` rewritten as the writer's `comment` asks, when Jev says the rewrite does what it asks and keeps the rest; None otherwise."""
+    reply = await generator.chat(HEADER_EDIT_INSTRUCTIONS, HEADER_EDIT_EXAMPLES, f"Field: {field}\nEntries:\n" + "\n".join(entries) + f"\n\nComment: {comment}", 40)
+    proposed = list(dict.fromkeys(filter(None, (line.strip(" -*\u2022") for line in reply.splitlines()))))
+    if proposed == entries:
+        return None
+    HeaderEdit = create_model(
+        "HeaderEdit",
+        __doc__=f"A writer's draft has a {field} header: {'; '.join(entries)}. The writer commented: '{comment}'. The new {field}: {'; '.join(proposed) or '(empty)'}.",
+        follows=(YesNo, Field(description="Does the new header do what the writer's comment asks?")),
+        keeps=(YesNo, Field(description="Are the entries the comment is not about still there, unchanged? Answer yes when every entry is one the comment is about.")),
+    )
+    check = await run(HeaderEdit, f"Comment: {comment}\n\nOld: {'; '.join(entries)}\n\nNew: {'; '.join(proposed)}")
+    applied = min(check["follows"], check["keeps"]) >= HEADER_EDIT_THRESHOLD
+    feed.act(check, "applied" if applied else "dropped", "follows", "keeps")
+    return proposed if applied else None
