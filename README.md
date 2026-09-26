@@ -18,6 +18,8 @@ Needs an Apple Silicon Mac (the text model runs locally on MLX) and your own Typ
 4. Start the app: `uv run python -m flow.app`
 5. Open http://127.0.0.1:8000 and type.
 
+Tests run offline, with Jev and the local model faked: `uv run --with pytest pytest`.
+
 ## What it does
 
 - A sentence about the draft (what it is, who it is for, how it should sound) lifts into the Goal, Audience, Tone or To do header.
