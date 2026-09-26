@@ -416,7 +416,7 @@ async def find_fixes(text: str, limit: int, goal: str, categories: list[str]) ->
 async def answer(sentence: str, paragraph: str, question: str, goal: str, memory: str, features: str) -> Answer:
     """The coworker's reply to the writer's `question` about `sentence`: the local model drafts `NUM_DRAFTS` in one batch, Jev ranks them on `DRAFT_CHECKS`.
 
-    Drafts that offer to fix an on-purpose word rank last, then drafts that fail `ANSWER_FLOOR` on "answers the question"; the top draft is shown unless every draft fails it, and then the drafts are resampled once.
+    Drafts that offer to fix an on-purpose word rank last, then drafts that fail `ANSWER_FLOOR` on "answers the question"; when every draft fails it the drafts are resampled once, and the text is empty when they fail again.
     Jev also names the kind of question; when it asks whether readers will understand, P(a reader gets it) leads the measures.
     When Jev says the question is about jevflow itself, the drafts are redone with `features`, the components' on/off state.
     """
@@ -427,12 +427,12 @@ async def answer(sentence: str, paragraph: str, question: str, goal: str, memory
         scope=(Scope, Field(description="Is the question about the last sentence, or about the whole paragraph (its length, pace or structure)?")),
         kind=(QuestionKind, Field(description="What is the writer asking? understand: will readers get it; opinion: what do you think; cut_or_keep: should it stay; true: is it accurate; wording: is there a better way to say it; other.")),
         reader_gets=(YesNo, Field(description=f"Would {reader} get what the sentence means?")),
-        about_assistant=(YesNo, Field(description="Is the writer asking the writing assistant about itself (what it can do, what it is doing, why it did something)?")),
+        about_assistant=(YesNo, Field(description="Is the question about the writing assistant itself, such as what it can do, rather than a request about the draft?")),
     )
     meta_task = asyncio.create_task(run(Meta, f"Paragraph: {paragraph}\n\nLast sentence: {sentence}\n\nQuestion: {question}"))
-    context, retries = memory, 1
+    shown_features, retries = "", 1
     while True:
-        drafts = list(dict.fromkeys(await generator.answers(sentence, paragraph, question, goal, NUM_DRAFTS, context)))
+        drafts = list(dict.fromkeys(await generator.answers(sentence, paragraph, question, goal, NUM_DRAFTS, memory, shown_features)))
         fields = {
             f"{name}_{index}": (YesNo, Field(description=template.format(draft=draft)))
             for index, draft in enumerate(drafts)
@@ -447,12 +447,15 @@ async def answer(sentence: str, paragraph: str, question: str, goal: str, memory
             reverse=True,
         )
         meta = await meta_task
-        if features and context == memory and meta["about_assistant"] >= NOTE_GATE:
-            context = memory + features
-        elif max(answers for _, answers, _ in ranked) >= ANSWER_FLOOR or not retries:
+        if features and not shown_features and meta["about_assistant"] >= NOTE_GATE:
+            shown_features = features
+        elif max(answers for _, answers, _ in ranked) >= ANSWER_FLOOR:
             break
-        else:
+        elif retries:
             retries -= 1
+        else:
+            feed.act(check, "dropped", *(f"answers_{index}" for index in range(len(drafts))))
+            return Answer("", [], meta["scope"])
     feed.act(check, "shown", *(f"{name}_{drafts.index(ranked[0][2])}" for name in ("answers", "specific", "voice")))
     feed.act(meta, "shown" if meta["kind"] == "understand" else "silent", "kind", "reader_gets")
     measures = [Measure("answers", "Does the reply answer the writer's question?", ranked[0][1])]
