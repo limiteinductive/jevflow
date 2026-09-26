@@ -32,6 +32,7 @@
   #asks { position: absolute; inset: 0; pointer-events: none; }
   .anchor { border-bottom: 2px solid rgba(var(--thread), 0.7); background: rgba(var(--thread), 0.08); }
   #comments { position: absolute; top: 0; left: calc(100% + 28px); width: 16rem; }
+  #comments.below { left: 0; width: 100%; z-index: 2; }
   .page-link { cursor: pointer; color: rgb(var(--thread)); border-bottom: 1px solid rgba(var(--thread), 0.4); }
   .card {
     position: absolute; left: 0; right: 0; background: var(--card-bg); border: 1px solid var(--card-edge); border-left: 3px solid rgb(var(--thread));
@@ -460,8 +461,14 @@ function renderThread(sheet) {
     }
     slot.replaceWith(thread.rings);
   }
-  card.style.top = `${span.getClientRects()[0].top - sheet.top - 4}px`;
+  const rects = span.getClientRects();
+  commentsLayer.classList.remove("below");
+  card.style.top = `${rects[0].top - sheet.top - 4}px`;
   commentsLayer.appendChild(card);
+  const edge = document.body.classList.contains("feed-open") ? document.getElementById("feed").getBoundingClientRect().left : window.innerWidth;
+  if (card.getBoundingClientRect().right <= edge) return;
+  commentsLayer.classList.add("below");
+  card.style.top = `${rects[rects.length - 1].bottom - sheet.top + 8}px`;
 }
 
 function characterRect(offset) {
