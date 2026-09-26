@@ -15,10 +15,9 @@ from flow import decide, generator
 
 NUM_CANDIDATES = 8
 NUM_GAUGES = 5
-X_POST_LIMIT = 280
-X_POST = re.compile(r"\b(tweet|x post|twitter post)\b", re.IGNORECASE)
-"""A goal for one post on X; a thread matches none of these words and gets no limit."""
-THREAD = re.compile(r"\bthread\b", re.IGNORECASE)
+LIMIT_THRESHOLD = 0.5
+"""The LLM's proposed character limit is shown when Jev's P(the text should stay under it) reaches this."""
+NUMBER = re.compile(r"\d+")
 LIST_MARKER = re.compile(r"^\s*(?:[-*\u2022]|\d+[.)])\s*")
 FIRST_SENTENCE = re.compile(r"\S.*?[.!?\n]", re.DOTALL)
 MAX_BRIEFS = 64
@@ -32,6 +31,12 @@ CATEGORY_EXAMPLES = [
     ("Goal: a meme caption", "funny\ngot in one second\nrelatable\nworth sharing\nsurprising\nshort\nin on the joke\ntimely"),
     ("Goal: a LinkedIn post\nAudience: recruiters", "strong first line\nconcrete\nhumble\nworth commenting on\neasy to skim\nshows results\nfree of buzzwords\npersonal"),
 ]
+
+LIMIT_INSTRUCTIONS = (
+    "The user names a kind of text a writer is drafting. If that kind of text has a hard or customary maximum length, "
+    "reply with that maximum in characters, as a number only. If it has none, reply with none."
+)
+LIMIT_EXAMPLES = [("Goal: a text message", "160"), ("Goal: a cover letter", "none"), ("Goal: a LinkedIn headline", "220")]
 
 
 @dataclass(frozen=True)
@@ -56,9 +61,16 @@ class Category:
     """The Jev question that scores the draft on this category."""
 
 
+@dataclass(frozen=True)
+class Pick:
+    categories: list[Category]
+    limit: int | None
+    """Character limit for this kind of text, or None when Jev does not confirm one."""
+
+
 router = APIRouter()
 
-brief_categories: dict[Brief, asyncio.Task[list[Category]]] = {}
+brief_categories: dict[Brief, asyncio.Task[Pick]] = {}
 """Gauge categories by brief, picked from the draft's first finished sentence, as tasks so concurrent pauses share one LLM and Jev round."""
 
 
@@ -81,12 +93,17 @@ class GaugeDraft(BaseModel):
     tone: str = ""
 
 
-async def choose_categories(brief: Brief, opening: str) -> list[Category]:
-    """The `NUM_GAUGES` LLM candidates that Jev says readers of this kind of text care about most, strongest first.
+async def choose_categories(brief: Brief, opening: str) -> Pick:
+    """The `NUM_GAUGES` LLM candidates that Jev says readers of this kind of text care about most, strongest first, and the LLM's character limit if Jev confirms it.
 
     Jev sees the draft's `opening` as well as the brief: a bare "X post" does not need to be funny, a joke X post does.
     """
-    reply = await generator.chat(CATEGORY_INSTRUCTIONS, CATEGORY_EXAMPLES, brief.prompt(), 100)
+    reply, limit_reply = await asyncio.gather(
+        generator.chat(CATEGORY_INSTRUCTIONS, CATEGORY_EXAMPLES, brief.prompt(), 100), generator.chat(LIMIT_INSTRUCTIONS, LIMIT_EXAMPLES, brief.prompt(), 8)
+    )
+    number = NUMBER.search(limit_reply)
+    limit = int(number.group()) if number else None
+    limit_field = {"limit": (decide.YesNo, Field(description=f"Should {brief.kind()} stay under {limit} characters?"))} if limit else {}
     candidates = list(dict.fromkeys(filter(None, (LIST_MARKER.sub("", line).strip().lower() for line in reply.splitlines()))))[:NUM_CANDIDATES]
     Matters = create_model(
         "Matters",
@@ -95,10 +112,12 @@ async def choose_categories(brief: Brief, opening: str) -> list[Category]:
             f"category_{index}": (decide.YesNo, Field(description=f"Would readers of {brief.kind()} like the one started here care whether it is {name}?"))
             for index, name in enumerate(candidates)
         },
+        **limit_field,
     )
     check = await decide.run(Matters, f"{brief.prompt()}\n\nStart of the draft: {opening}")
     ranked = sorted(((check[f"category_{index}"], name) for index, name in enumerate(candidates)), reverse=True)[:NUM_GAUGES]
-    return [Category(name, f"Is this {brief.goal} {name}?") for _, name in ranked]
+    confirmed = limit if limit and check["limit"] >= LIMIT_THRESHOLD else None
+    return Pick([Category(name, f"Is this {brief.goal} {name}?") for _, name in ranked], confirmed)
 
 
 async def score(text: str, brief: Brief, categories: list[Category]) -> Scores:
@@ -115,7 +134,7 @@ async def score(text: str, brief: Brief, categories: list[Category]) -> Scores:
 
 @router.post("/gauges")
 async def gauges(draft: GaugeDraft) -> dict:
-    """The gauges for the draft under its brief, and the character limit when the goal is one X post.
+    """The gauges for the draft under its brief, and the character limit for this kind of text, if any.
 
     Empty until the draft has a finished first sentence or line, which picks the categories.
     """
@@ -127,17 +146,17 @@ async def gauges(draft: GaugeDraft) -> dict:
         if len(brief_categories) > MAX_BRIEFS:
             brief_categories.pop(next(iter(brief_categories)))
     try:
-        categories = await brief_categories[brief]
+        pick = await brief_categories[brief]
     except Exception:
         brief_categories.pop(brief, None)
         raise
     if (brief, text) not in draft_scores:
-        draft_scores[brief, text] = await score(text, brief, categories)
+        draft_scores[brief, text] = await score(text, brief, pick.categories)
         if len(draft_scores) > MAX_DRAFTS:
             draft_scores.pop(next(iter(draft_scores)))
     scores = draft_scores[brief, text]
     return {
-        "gauges": [{"name": category.name, "question": category.question, "probability": probability} for category, probability in zip(categories, scores.probabilities)],
-        "limit": X_POST_LIMIT if X_POST.search(brief.goal) and not THREAD.search(brief.goal) else None,
+        "gauges": [{"name": category.name, "question": category.question, "probability": probability} for category, probability in zip(pick.categories, scores.probabilities)],
+        "limit": pick.limit,
         "seconds": scores.seconds,
     }

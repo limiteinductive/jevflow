@@ -389,8 +389,6 @@ const GAUGE_FADE_MS = 500;
 const DELTA_MS = 2500;
 let gauges = [], gaugeLimit = null, gaugeBrief = "", gaugesRequest = 0, gaugeSeconds = null;
 const gaugeTimings = [];
-const X_URL_LENGTH = 23;
-const X_LIGHT_RANGES = [[0, 4351], [8192, 8205], [8208, 8223], [8242, 8247]];
 const graphemes = new Intl.Segmenter();
 
 function latestHeader(field) {
@@ -424,7 +422,7 @@ function setRing(element, probability, question) {
   element.getBoundingClientRect();
   element.classList.remove("entering");
   const percent = Math.round(100 * probability);
-  element.querySelector(".tip").innerHTML = `<b>Jev</b> asked: “${escape(question)}”<br>P(yes) = ${percent}% · ${levelWord(probability)}`;
+  element.querySelector(".tip").innerHTML = `“${escape(question)}”<br>${percent}% yes · ${levelWord(probability)}`;
   if (element.target === probability) return;
   const change = element.target === null ? 0 : percent - Math.round(100 * element.target);
   element.target = probability;
@@ -446,7 +444,7 @@ function renderGauges() {
   if (!currentGoal()) { gaugesBox.innerHTML = ""; return; }
   let meter = gaugesBox.querySelector(".jev-meter");
   if (!meter && gauges.length) { meter = document.createElement("div"); meter.className = "jev-meter"; gaugesBox.prepend(meter); }
-  if (meter) meter.innerHTML = `<span>Impact for <b>${escape(currentGoal())}</b></span><span><b>Jev</b> · ${gauges.length} questions${gaugeSeconds === null ? "" : ` · ${gaugeSeconds.toFixed(2)} s`}</span>`;
+  if (meter) meter.innerHTML = `<span>Impact for <b>${escape(currentGoal())}</b></span><span>${gauges.length} questions${gaugeSeconds === null ? "" : ` · ${gaugeSeconds.toFixed(2)} s`}</span>`;
   for (const gauge of gauges) {
     let element = gaugesBox.querySelector(`.gauge[data-name="${CSS.escape(gauge.name)}"]:not(.leaving)`);
     if (!element) {
@@ -464,22 +462,14 @@ function renderGauges() {
   if (gaugeLimit && !count) { count = document.createElement("div"); count.className = "count"; gaugesBox.appendChild(count); }
   if (!gaugeLimit && count) count.remove();
   if (gaugeLimit) {
-    const length = xLength(editor.value.trim());
+    const length = textLength(editor.value.trim());
     count.textContent = `${length} / ${gaugeLimit}`;
     count.style.color = length > gaugeLimit ? "rgb(200, 70, 60)" : "";
   }
 }
 
-function xLength(text) {
-  let length = 0;
-  for (const piece of text.split(/(https?:\/\/\S+)/)) {
-    if (/^https?:\/\//.test(piece)) { length += X_URL_LENGTH; continue; }
-    for (const { segment } of graphemes.segment(piece)) {
-      const code = segment.codePointAt(0);
-      length += X_LIGHT_RANGES.some(([low, high]) => code >= low && code <= high) && segment.length === 1 ? 1 : 2;
-    }
-  }
-  return length;
+function textLength(text) {
+  return [...graphemes.segment(text)].length;
 }
 
 function tweenValue(element, target) {
