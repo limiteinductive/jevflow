@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from fastapi import APIRouter
 from pydantic import BaseModel, Field, create_model
 
-from flow import decide, feed, generator
+from flow import feed, generator, jev
 
 NUM_CANDIDATES = 8
 NUM_GAUGES = 5
@@ -111,21 +111,21 @@ async def choose_categories(brief: Brief, opening: str) -> Pick:
     )
     number = NUMBER.search(limit_reply)
     limit = int(number.group()) if number else None
-    limit_field = {"limit": (decide.YesNo, Field(description=f"Should {brief.kind()} stay under {limit} characters?"))} if limit else {}
+    limit_field = {"limit": (jev.YesNo, Field(description=f"Should {brief.kind()} stay under {limit} characters?"))} if limit else {}
     candidates = list(dict.fromkeys(filter(None, (LIST_MARKER.sub("", line).strip().lower() for line in reply.splitlines()))))[:NUM_CANDIDATES]
     Matters = create_model(
         "Matters",
         __doc__=f"A writer is drafting {brief.kind()}.",
         **{
-            f"category_{index}": (decide.YesNo, Field(description=f"Would readers of {brief.kind()} like the one started here care whether it is {name}?"))
+            f"category_{index}": (jev.YesNo, Field(description=f"Would readers of {brief.kind()} like the one started here care whether it is {name}?"))
             for index, name in enumerate(candidates)
         },
         **limit_field,
     )
-    check = await decide.run(Matters, f"{brief.prompt()}\n\nStart of the draft: {opening}")
+    check = await jev.run(Matters, f"{brief.prompt()}\n\nStart of the draft: {opening}")
     ranked = sorted(((check[f"category_{index}"], name) for index, name in enumerate(candidates)), reverse=True)[:NUM_GAUGES]
     confirmed = limit if limit and check["limit"] >= LIMIT_THRESHOLD else None
-    feed.act(check, "applied", *(f"category_{candidates.index(name)}" for _, name in ranked), *(["limit"] if confirmed else []))
+    feed.act(check, "applied", *(f"category_{candidates.index(name)}" for _, name in ranked), *(["limit"] if confirmed else []), component="gauges")
     return Pick([Category(name, f"Is this {brief.goal} {name}?") for _, name in ranked], confirmed)
 
 
@@ -134,11 +134,11 @@ async def score(text: str, brief: Brief, categories: list[Category]) -> Scores:
     Impact = create_model(
         "Impact",
         __doc__=f"A writer is drafting {brief.kind()}.",
-        **{f"category_{index}": (decide.YesNo, Field(description=category.question)) for index, category in enumerate(categories)},
+        **{f"category_{index}": (jev.YesNo, Field(description=category.question)) for index, category in enumerate(categories)},
     )
     began = time.perf_counter()
-    check = await decide.run(Impact, f"Draft: {text}")
-    feed.act(check, "shown", *check)
+    check = await jev.run(Impact, f"Draft: {text}")
+    feed.act(check, "shown", *check, component="gauges")
     return Scores([check[f"category_{index}"] for index in range(len(categories))], time.perf_counter() - began)
 
 
@@ -186,12 +186,12 @@ async def change(request: CategoryChange) -> dict:
     ChangeCheck = create_model(
         "ChangeCheck",
         __doc__=f"A writer's draft of {brief.kind()} is scored on: {'; '.join(names)}. The writer commented: '{request.comment}'. The new list: {'; '.join(proposed)}.",
-        follows=(decide.YesNo, Field(description="Does the new list do what the writer's comment asks?")),
-        keeps=(decide.YesNo, Field(description="Does the new list keep every item the comment does not ask to change?")),
+        follows=(jev.YesNo, Field(description="Does the new list do what the writer's comment asks?")),
+        keeps=(jev.YesNo, Field(description="Does the new list keep every item the comment does not ask to change?")),
     )
-    check = await decide.run(ChangeCheck, f"Comment: {request.comment}\n\nOld: {'; '.join(names)}\n\nNew: {'; '.join(proposed)}")
+    check = await jev.run(ChangeCheck, f"Comment: {request.comment}\n\nOld: {'; '.join(names)}\n\nNew: {'; '.join(proposed)}")
     applied = min(check["follows"], check["keeps"]) >= CHANGE_THRESHOLD
-    feed.act(check, "applied" if applied else "dropped", "follows", "keeps")
+    feed.act(check, "applied" if applied else "dropped", "follows", "keeps", component="gauges")
     if not applied:
         return {"categories": None}
     changed = Pick([Category(name, f"Is this {brief.goal} {name}?") for name in proposed], old.limit)

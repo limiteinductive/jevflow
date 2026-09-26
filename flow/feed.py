@@ -3,17 +3,22 @@
 Nothing is written to disk; the buffer holds the last `CAPACITY` requests since the server started.
 """
 
+from __future__ import annotations
+
 import contextvars
 import itertools
 import statistics
 import time
-from collections import deque
+from collections import Counter, deque
 from dataclasses import asdict, dataclass, field
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 from pydantic_ai import Agent
+
+if TYPE_CHECKING:
+    from flow.components import ComponentName
 
 CAPACITY = 400
 PRICE_PER_MILLION_INPUT_TOKENS = 0.042
@@ -38,6 +43,10 @@ class Question:
     answer: str
     """The chosen option or level; the likeliest one for a cache replay."""
     distribution: dict[str, float]
+    action: Action | None = None
+    """What the page did with this answer; None until a component acts on it."""
+    component: ComponentName | None = None
+    """The component that acted on this answer; None for a gate shared by every component, such as the timing gate."""
 
 
 @dataclass
@@ -73,6 +82,8 @@ decisions = 0
 """Jev questions answered since the server started, across every Jev request."""
 replays = 0
 """Questions replayed from a cache since the server started; not in `decisions`."""
+uses: Counter[ComponentName] = Counter()
+"""Applied and shown actions per component since the server started; the panel sorts its rows by it."""
 input_tokens = 0
 began = time.perf_counter()
 router = APIRouter()
@@ -121,12 +132,25 @@ async def ask(agent: Agent, prompt: str, output_type: type[BaseModel] | None = N
     return result, answers
 
 
-def act(answers: dict[str, float | str], action: Action, *decisive: str) -> None:
-    """Mark what the page does with `answers` (as returned by `ask`) and which questions decided it."""
+def act(answers: dict[str, float | str], action: Action, *decisive: str, component: ComponentName | None) -> None:
+    """Mark what `component` does with `answers` (as returned by `ask`) on the questions that decided it; the record keeps the latest action for its dot.
+
+    One request can serve several components, such as the note gate asking for notes, reactions and toggles; each credits only its own questions.
+    """
     for kept in reversed(records):
         if kept.answers is answers:
+            for question in kept.questions:
+                if question.name in decisive:
+                    question.action, question.component = action, component
             kept.action, kept.decisive, kept.version = action, list(decisive), next(versions)
+            if component and action in ("applied", "shown"):
+                uses[component] += 1
             return
+
+
+@router.get("/feed/uses")
+async def component_uses() -> dict[str, int]:
+    return uses
 
 
 @router.get("/feed")
