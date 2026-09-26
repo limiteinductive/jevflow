@@ -525,6 +525,8 @@ async function pollFeed() {
   renderFeed();
 }
 
+const attribute = (text) => escape(text).replace(/"/g, "&quot;");
+
 function answerBar(question) {
   const probability = question.kind === "yes/no" ? question.answer : question.distribution[question.answer] || 0;
   return { probability, option: question.kind === "yes/no" ? "" : String(question.answer) };
@@ -557,7 +559,7 @@ function renderFeed() {
       const rows = ranked.slice(0, FEED_ROWS).map((question) => {
         const { probability, option } = answerBar(question);
         const key = record.decisive.includes(question.name) ? " key" : "";
-        return `<div class="feed-row${key}${fresh ? " fresh" : ""}" style="--index: ${row++}" title="${escape(question.text)}" data-ref="decision:${record.id}-${question.name}" data-ref-data="${escape(question.text)} ${Math.round(100 * probability)}%"><div class="bar"><b style="width: ${100 * probability}%; background: ${gaugeColor(probability)}"></b></div><span class="value">${Math.round(100 * probability)}%</span><span class="text">${option ? `<em>${escape(option)}</em>` : ""}${escape(question.text)}</span></div>`;
+        return `<div class="feed-row${key}${fresh ? " fresh" : ""}" style="--index: ${row++}" title="${attribute(question.text)}" data-ref="decision:${record.id}-${question.name}" data-ref-data="${attribute(question.text)} ${Math.round(100 * probability)}%"><div class="bar"><b style="width: ${100 * probability}%; background: ${gaugeColor(probability)}"></b></div><span class="value">${Math.round(100 * probability)}%</span><span class="text">${option ? `<em>${escape(option)}</em>` : ""}${escape(question.text)}</span></div>`;
       }).join("");
       const more = record.questions.length > FEED_ROWS ? `<div class="feed-more">+${record.questions.length - FEED_ROWS} more</div>` : "";
       return `<div data-record="${record.id}" class="feed-call ${record.action || ""}${record.cached ? " cached" : ""}${acted}"><h4><i class="dot ${record.action || "pending"}" title="${record.action || "no action"}"></i><b>${escape(record.endpoint)}</b>${escape(record.schema)} · ${record.questions.length}<span>${record.cached ? "cache" : `${record.seconds.toFixed(2)}s`}</span></h4>${rows}${more}</div>`;
