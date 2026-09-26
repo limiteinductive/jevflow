@@ -3,6 +3,8 @@
 Jev makes every decision; these calls only write text.
 """
 
+import asyncio
+
 import httpx
 
 MLX_URL = "http://127.0.0.1:8085/v1"
@@ -183,6 +185,12 @@ async def revise(sentence: str, comment: str, reply: str, memory: str) -> str:
 async def mash_comment(text: str, goal: str) -> str:
     """The coworker's one-line check-in on keyboard mash the writer typed."""
     return undash(await chat(MASH_INSTRUCTIONS, MASH_EXAMPLES, f"Goal: {goal}\nTyped: {text}", 40))
+
+
+async def revisions(sentence: str, comment: str, count: int) -> list[str]:
+    """`count` sampled rewrites of `sentence` as `comment` asks, one request each since the server returns one reply per request."""
+    batches = await asyncio.gather(*(sample(REVISE_INSTRUCTIONS, REVISE_EXAMPLES, f"Sentence: {sentence}\nComment: {comment}\nWriter's reply: rewrite it", 1, 2 * len(sentence.split()) + 40, 0.9) for _ in range(count)))
+    return [rewrite for batch in batches for rewrite in batch]
 
 
 async def extract_question(sentence: str) -> str:

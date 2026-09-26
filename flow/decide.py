@@ -38,6 +38,8 @@ DRAFT_CHECKS = {
     "casual": "Does the reply '{draft}' sound like a casual text from a friend?",
 }
 """Jev's questions on each drafted reply, all drafts in one payload; a draft ranks by the product of its answers."""
+ON_PURPOSE_CHECK = "Does '{draft}' call a word or spelling the writer chose on purpose, for voice or a joke (like 'akshually' or 'gonna'), a mistake, or offer to fix it?"
+"""Asked of each draft beside `DRAFT_CHECKS`; a draft at or above `NOTE_GATE` ranks below every other, so the reply never offers a fix the rewrite gate's on_purpose check would refuse."""
 ANSWER_FLOOR = 0.3
 """Below this on "answers the writer's question?" for every draft, the drafts are resampled once."""
 FIX_THRESHOLD = 0.7
@@ -108,6 +110,14 @@ class Measure:
 
 
 @dataclass(frozen=True)
+class Rewrite:
+    text: str
+    keeps_meaning: float
+    uses_pattern: float
+    """P(the rewrite still reads as the flagged pattern)."""
+
+
+@dataclass(frozen=True)
 class Answer:
     text: str
     """The coworker's words, written by the local model."""
@@ -141,7 +151,7 @@ class Timing:
 class GoalSuggestion:
     replacement: str
     comment: str
-    """Why the sentence should change, such as "For a LinkedIn post, this sentence works against 'concrete'."."""
+    """Why the sentence should change, such as "heads up: for a LinkedIn post, this one works against 'concrete'."."""
     measures: list[Measure]
 
 
@@ -265,7 +275,11 @@ async def decide_note(sentence: str, comment: str, goal: str, enabled: frozenset
 
     if field == "new_page":
         header_check = await run(HeaderCheck, f"Note: {note}\n\nHeader: {header}")
-        return SentenceNote(sentence, probability, field, headers("goal", sentence))
+        seeded = headers("goal", sentence)
+        print(f"new_page: {sentence!r} P={probability:.2f} goal={goal!r} seeds={[header.text for header in seeded]}", flush=True)
+        if any(header.field == "goal" and header.text.strip().lower() == goal.strip().lower() for header in seeded):
+            return None
+        return SentenceNote(sentence, probability, field, seeded)
     check, header_check = await asyncio.gather(run(NoteCheck, f"Sentence: {sentence}"), run(HeaderCheck, f"Note: {note}\n\nHeader: {header}"))
     if note not in sentence or min(check["only_note"], check["whole_note"]) < NOTE_THRESHOLD:
         if check["sentence_only_note"] < NOTE_THRESHOLD:
@@ -369,7 +383,7 @@ async def decide_fix(sentence: str, draft: str, goal: str, categories: list[str]
         feed.act(check, "dropped" if corrects else "silent", *check)
         return None, None
     against = " and ".join(f"'{category}'" for _, category in hurt)
-    comment = f"For {goal}, this sentence works against {against}."
+    comment = f"heads up: for {goal}, this one works against {against}."
     rewrite = await revise(sentence, comment, "ok", "", "")
     if rewrite is None or rewrite == sentence:
         feed.act(check, "dropped", *hurts)
@@ -402,7 +416,7 @@ async def find_fixes(text: str, limit: int, goal: str, categories: list[str]) ->
 async def answer(sentence: str, paragraph: str, question: str, goal: str, memory: str, features: str) -> Answer:
     """The coworker's reply to the writer's `question` about `sentence`: the local model drafts `NUM_DRAFTS` in one batch, Jev ranks them on `DRAFT_CHECKS`.
 
-    The top-ranked draft is shown unless every draft fails "answers the question"; then the drafts are resampled once.
+    Drafts that offer to fix an on-purpose word rank last, then drafts that fail `ANSWER_FLOOR` on "answers the question"; the top draft is shown unless every draft fails it, and then the drafts are resampled once.
     Jev also names the kind of question; when it asks whether readers will understand, P(a reader gets it) leads the measures.
     When Jev says the question is about jevflow itself, the drafts are redone with `features`, the components' on/off state.
     """
@@ -423,10 +437,15 @@ async def answer(sentence: str, paragraph: str, question: str, goal: str, memory
             f"{name}_{index}": (YesNo, Field(description=template.format(draft=draft)))
             for index, draft in enumerate(drafts)
             for name, template in DRAFT_CHECKS.items()
-        }
+        } | {f"on_purpose_{index}": (YesNo, Field(description=ON_PURPOSE_CHECK.format(draft=draft))) for index, draft in enumerate(drafts)}
         Pick = create_model("Pick", __doc__=f"A writer drafting a {goal or 'text'} asks a coworker about the sentence they just wrote; the coworker drafted replies.", **fields)
         check = await run(Pick, f"Paragraph: {paragraph}\n\nLast sentence: {sentence}\n\nQuestion: {question}")
-        ranked = sorted(((math.prod(check[f"{name}_{index}"] for name in DRAFT_CHECKS), check[f"answers_{index}"], draft) for index, draft in enumerate(drafts)), reverse=True)
+        on_purpose = {draft: check[f"on_purpose_{index}"] for index, draft in enumerate(drafts)}
+        ranked = sorted(
+            ((math.prod(check[f"{name}_{index}"] for name in DRAFT_CHECKS), check[f"answers_{index}"], draft) for index, draft in enumerate(drafts)),
+            key=lambda row: (on_purpose[row[2]] < NOTE_GATE, row[1] >= ANSWER_FLOOR, row[0]),
+            reverse=True,
+        )
         meta = await meta_task
         if features and context == memory and meta["about_assistant"] >= NOTE_GATE:
             context = memory + features
@@ -469,6 +488,29 @@ async def revise(sentence: str, comment: str, reply: str, proposed: str, memory:
     check = await run(ReviseCheck, f"Sentence: {sentence}\n\nRewrite: {replacement}")
     feed.act(check, "applied" if replacement and min(check.values()) >= FIX_THRESHOLD else "dropped", min(check, key=check.get))
     return replacement if replacement and min(check.values()) >= FIX_THRESHOLD else None
+
+
+async def rewrite(sentence: str, pattern: str) -> Rewrite | None:
+    """The local model's best of `NUM_DRAFTS` rewrites of `sentence` without `pattern`, all scored in one Jev payload; None when none keeps the meaning and drops the pattern."""
+    drafts = list(dict.fromkeys(draft for draft in await generator.revisions(sentence, f"It reads as {pattern}. Say what it is as a plain statement, with no contrast against what it is not.", NUM_DRAFTS) if draft and draft != sentence))
+    if not drafts:
+        return None
+    fields = {}
+    for index, draft in enumerate(drafts):
+        fields[f"keeps_meaning_{index}"] = (YesNo, Field(description=f"Does '{draft}' keep the meaning of the sentence?"))
+        fields[f"uses_pattern_{index}"] = (YesNo, Field(description=f"Does '{draft}' still read as {pattern}?"))
+    check = await run(create_model("RewriteCheck", __doc__=f"A writer's sentence reads as {pattern}. Sentence: '{sentence}'. A coworker drafted rewrites.", **fields), f"Sentence: {sentence}")
+    passing = [
+        (check[f"keeps_meaning_{index}"] * (1 - check[f"uses_pattern_{index}"]), index)
+        for index in range(len(drafts))
+        if check[f"keeps_meaning_{index}"] >= FIX_THRESHOLD and 1 - check[f"uses_pattern_{index}"] >= FIX_THRESHOLD
+    ]
+    if not passing:
+        feed.act(check, "dropped", *check)
+        return None
+    _, best = max(passing)
+    feed.act(check, "applied", f"keeps_meaning_{best}", f"uses_pattern_{best}")
+    return Rewrite(drafts[best], check[f"keeps_meaning_{best}"], check[f"uses_pattern_{best}"])
 
 
 async def about_component(span: str, question: str, component: str, text: str, sentence: str, paragraph: str, goal: str, memory: str) -> ComponentReply:
