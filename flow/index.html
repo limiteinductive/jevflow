@@ -246,6 +246,7 @@ function liftNotes() {
     notes = notes.filter((other) => other !== note);
     if (note.field === "question" || note.field === "reply") {
       const anchor = previousSentence(editor.value, note.start);
+      if (note.field === "question" && !anchor.text) continue;
       const [start, end] = removalRange(editor.value, note);
       applyEdit(start, end, "", `note ${note.text}`);
       if (note.field === "reply" && thread && thread.answer) replyToThread(note.text);
@@ -307,13 +308,13 @@ async function findInsights() {
 }
 
 editor.addEventListener("input", () => {
-  render();
   clearTimeout(notesTimer);
   clearTimeout(insightsTimer);
   clearTimeout(fixesTimer);
   notesTimer = setTimeout(findNotes, 600);
   insightsTimer = setTimeout(findInsights, 900);
   fixesTimer = setTimeout(findFixes, 900);
+  render();
 });
 editor.addEventListener("keydown", (event) => {
   if (event.key === "z" && (event.metaKey || event.ctrlKey) && !event.shiftKey && history.length) {

@@ -108,7 +108,9 @@ async def decide_note(sentence: str, comment: str) -> SentenceNote | None:
         field=(HeaderField, Field(description="What is the note about? goal: what the writer is writing; audience: who it is for; tone: how it should sound; to_do: something to add, check or change; undo: asks to undo the last edit.")),
         **reply,
     )
-    gate, (note, header) = await asyncio.gather(run(NoteGate, f"Sentence: {sentence}"), generator.extract_note(sentence))
+    gate, (note, header), question = await asyncio.gather(
+        run(NoteGate, f"Sentence: {sentence}"), generator.extract_note(sentence), generator.extract_question(sentence)
+    )
     if gate.get("reply", 0) >= NOTE_GATE:
         return SentenceNote(sentence, gate["reply"], "reply", "")
     asks = min(gate["asks"], gate["is_question"])
@@ -119,7 +121,7 @@ async def decide_note(sentence: str, comment: str) -> SentenceNote | None:
     if field == "undo":
         return SentenceNote(sentence, probability, "undo", "") if len(sentence.split()) <= MAX_NOTE_WORDS else None
     if field == "question":
-        return SentenceNote(sentence, probability, "question", "")
+        return SentenceNote(await question_span(sentence, question), probability, "question", "")
     NoteCheck = create_model(
         "NoteCheck",
         __doc__=NOTE_CONTEXT + f" The sentence is: '{sentence}'.",
@@ -139,6 +141,19 @@ async def decide_note(sentence: str, comment: str) -> SentenceNote | None:
             return None
         note = sentence
     return SentenceNote(note, probability, field, header if min(header_check["fair"], 1 - header_check["adds"]) >= NOTE_THRESHOLD else note)
+
+
+async def question_span(sentence: str, question: str) -> str:
+    """The question words when they end `sentence` and Jev says they hold the whole question, else the whole sentence; the text before them stays in the draft."""
+    if not question or question == sentence or not sentence.endswith(question):
+        return sentence
+    QuestionCheck = create_model(
+        "QuestionCheck",
+        __doc__=f"A writer typed: '{sentence}'.",
+        whole_question=(YesNo, Field(description=f"Does '{question}' hold the whole question, leaving none of its words out?")),
+    )
+    check = await run(QuestionCheck, f"Typed: {sentence}")
+    return question if check["whole_question"] >= NOTE_THRESHOLD else sentence
 
 
 async def find_notes(text: str, comment: str) -> list[Note]:

@@ -47,6 +47,15 @@ REVISE_EXAMPLES = [
         "my cat hid from the vacuum for years. turns out she was right all along",
     )
 ]
+QUESTION_INSTRUCTIONS = (
+    "The user message is text a writer typed. It ends with a question the writer asks their coworker about the text, and it may start with the writer's own text. "
+    "Reply with the question words only, copied exactly, leaving out the writer's own text."
+)
+QUESTION_EXAMPLES = [
+    ("We shipped on friday lol does this sound too smug?", "does this sound too smug?"),
+    ("my cat hates the vacuum ok wait is that even funny", "ok wait is that even funny"),
+    ("should I cut this?", "should I cut this?"),
+]
 
 mlx = httpx.AsyncClient(base_url=MLX_URL, timeout=30)
 
@@ -89,3 +98,8 @@ async def answer(sentence: str, question: str, goal: str, seed: int) -> str:
 
 async def revise(sentence: str, comment: str) -> str:
     return await chat(REVISE_INSTRUCTIONS, REVISE_EXAMPLES, f"Sentence: {sentence}\nComment: {comment}", 2 * len(sentence.split()) + 40)
+
+
+async def extract_question(sentence: str) -> str:
+    """The question words at the end of `sentence`, copied as the local model reads them."""
+    return (await chat(QUESTION_INSTRUCTIONS, QUESTION_EXAMPLES, sentence, 40)).strip().strip("'\"")
