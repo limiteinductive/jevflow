@@ -38,6 +38,8 @@
   .card .coworker b { color: rgb(var(--thread)); }
   .card .measure { display: inline-block; margin: 0 4px 4px 0; padding: 0 6px; border-radius: 4px; font-size: 11px; background: rgba(var(--thread), 0.12); color: rgb(var(--thread)); }
   .card .status { color: var(--faint); font-size: 11.5px; }
+  .card.shake { animation: shake 0.4s; }
+  @keyframes shake { 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
   .ask {
     position: absolute; transform: translateY(-100%); font: 11.5px/1.25 -apple-system, "Helvetica Neue", sans-serif;
     background: var(--ask-bg); color: var(--ask-ink); padding: 1px 7px; border-radius: 5px; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis;
@@ -160,7 +162,7 @@ function renderThread(sheet) {
   const span = backdrop.querySelector("[data-thread]");
   if (!span) return;
   const card = document.createElement("div");
-  card.className = "card";
+  card.className = thread.kept ? "card shake" : "card";
   const lines = thread.question ? [`<p><b>You</b>${escape(thread.question)}</p>`] : [];
   const measures = (thread.measures || []).map((measure) => `<span class="measure">${escape(measure.label)} ${Math.round(100 * measure.probability)}%</span>`).join("");
   lines.push(`<p class="coworker"><b>jevflow</b>${thread.answer === undefined ? '<span class="status">thinking…</span>' : measures + escape(thread.answer)}</p>`);
@@ -200,19 +202,21 @@ async function openThread(anchor, question) {
 async function replyToThread(reply) {
   const replied = thread;
   thread.reply = reply;
-  thread.status = "rewriting…";
+  thread.status = "…";
   render();
   const result = await post("/revise", { sentence: thread.anchor.text, comment: thread.comment || thread.answer, reply, proposed: thread.replacement || "" });
   if (thread !== replied) return;
   if (!result.replacement || !stillThere(thread.anchor)) {
-    thread.status = "leaving your sentence as is.";
+    thread.status = "";
+    thread.kept = true;
     render();
+    setTimeout(() => { replied.kept = false; }, 400);
     return;
   }
   const { start, end } = thread.anchor;
   applyEdit(start, end, result.replacement, `revise ${thread.anchor.text} ${result.replacement}`);
   thread.anchor = { start, end: start + result.replacement.length, text: result.replacement };
-  thread.status = "done ✅ undo puts it back";
+  thread.status = "✅";
   const flash = { ...thread.anchor };
   flashes.push(flash);
   setTimeout(() => { flashes = flashes.filter((other) => other !== flash); render(); }, FLASH_MS);
