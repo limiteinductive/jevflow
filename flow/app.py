@@ -13,7 +13,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from flow import components, decide, feed, gauges, memory, reactions
+from flow import claims, components, decide, feed, gauges, memory, reactions
 from flow.components import ComponentName
 from mirror.model import Stacker
 from mirror.scan import scan
@@ -126,6 +126,7 @@ async def notes(draft: CommentedDraft) -> dict:
         "reactions": [asdict(reaction) for reaction in reactions.find(sentences, draft.goal, found)] if "reactions" in enabled else [],
         "toggles": [asdict(toggle) for toggle in components.find(sentences)],
         "meta": [{"start": sentence.start, "end": sentence.start + len(sentence.text), "text": sentence.text} for sentence in decide.meta_spans(sentences)],
+        "claims": [asdict(claim) for claim in claims.find(sentences, draft.goal, found)] if "claims" in enabled else [],
     }
 
 

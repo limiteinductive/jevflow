@@ -12,7 +12,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, create_model
 from pydantic_ai import Agent
 
-from flow import components, feed, generator, reactions
+from flow import claims, components, feed, generator, reactions
 from text_processing import Sentence, split_sentences
 
 MODEL = "typesafe:jev-latest"
@@ -209,6 +209,7 @@ async def decide_note(sentence: str, comment: str, goal: str, enabled: frozenset
         **new_piece,
         **components.fields(),
         **(reactions.fields(goal) if "reactions" in enabled else {}),
+        **(claims.fields(goal) if "claims" in enabled else {}),
     )
     gate, (note, header), question, audience = await asyncio.gather(
         run(NoteGate, f"Sentence: {sentence}"), generator.extract_note(sentence), generator.extract_question(sentence), generator.extract_audience(sentence)
@@ -216,6 +217,8 @@ async def decide_note(sentence: str, comment: str, goal: str, enabled: frozenset
     if "reactions" in enabled:
         reactions.record(sentence, goal, gate)
     meta_sentences[sentence] = gate["for_assistant"]
+    if "claims" in enabled:
+        claims.record(sentence, goal, gate)
     if components.record(sentence, gate):
         return None
     if gate.get("reply", 0) >= NOTE_GATE:
