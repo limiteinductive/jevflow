@@ -13,7 +13,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from flow import decide, gauges
+from flow import decide, gauges, reactions
 from mirror.model import Stacker
 from mirror.scan import scan
 
@@ -35,6 +35,8 @@ class CommentedDraft(BaseModel):
     """The coworker's open comment, or empty; a sentence can be a reply to it."""
     breaks: list[int]
     """Offsets where a sentence must end even without punctuation: the end of the open thread's anchor."""
+    goal: str
+    """The Goal header, or empty; it conditions the reaction questions."""
 
 
 class Question(BaseModel):
@@ -91,8 +93,8 @@ async def log_decisions(request: Request, call_next):
 
 @app.post("/notes")
 async def notes(draft: CommentedDraft) -> dict:
-    found, timing = await asyncio.gather(decide.find_notes(draft.text, draft.comment, draft.breaks), decide.timing(draft.text))
-    return {"notes": [asdict(note) for note in found], "timing": asdict(timing)}
+    found, timing = await asyncio.gather(decide.find_notes(draft.text, draft.comment, draft.breaks, draft.goal), decide.timing(draft.text))
+    return {"notes": [asdict(note) for note in found], "timing": asdict(timing), "reactions": [asdict(reaction) for reaction in reactions.find(decide.line_sentences(draft.text, draft.breaks), draft.goal, found)]}
 
 
 @app.post("/answer")

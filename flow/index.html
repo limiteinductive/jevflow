@@ -56,6 +56,17 @@
   .gauge:hover::after { content: attr(data-level); position: absolute; top: -20px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--paper); padding: 1px 6px; border-radius: 4px; white-space: nowrap; }
   .count { align-self: center; font-variant-numeric: tabular-nums; color: var(--ink); }
   .count.over { color: rgb(200, 60, 50); font-weight: 600; }
+  #reactions { position: absolute; inset: 0; pointer-events: none; }
+  .reaction {
+    position: absolute; transform: translateY(-50%); font: 14px/1 -apple-system, "Apple Color Emoji", sans-serif; background: var(--card-bg); border: 1px solid var(--card-edge);
+    border-radius: 999px; padding: 3px 6px; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1); animation: reaction-in 0.6s ease-out; pointer-events: auto;
+  }
+  .reaction::after {
+    content: ""; position: absolute; left: 4px; right: 4px; bottom: -7px; height: 3px; border-radius: 2px; opacity: 0; transition: opacity 0.2s;
+    background: linear-gradient(to right, rgb(var(--thread)) calc(var(--probability) * 100%), var(--card-edge) 0);
+  }
+  .reaction:hover::after { opacity: 1; }
+  @keyframes reaction-in { from { opacity: 0; transform: translateY(-20%) scale(0.6); } }
 </style>
 </head>
 <body>
@@ -67,20 +78,23 @@
     <textarea id="editor" class="layer" spellcheck="false" autofocus placeholder="Just write. Say what you're writing, who it's for and what to fix, all inline."></textarea>
     <div id="asks"></div>
     <div id="comments"></div>
+    <div id="reactions"></div>
   </div>
 </div>
 <script>
 const FIELDS = { goal: "Goal", audience: "Audience", tone: "Tone", to_do: "To do" };
 const MAX_OPEN_QUESTIONS = 3;
+const MAX_REACTIONS = 3;
 const FLASH_MS = 1200;
 const editor = document.getElementById("editor");
 const backdrop = document.getElementById("backdrop");
 const asksLayer = document.getElementById("asks");
 const headersBox = document.getElementById("headers");
 const commentsLayer = document.getElementById("comments");
+const reactionsLayer = document.getElementById("reactions");
 const THREAD_FADE_SENTENCES = 2;
 let thread = null;
-let notes = [], insights = [], headers = [], history = [], flashes = [];
+let notes = [], insights = [], headers = [], history = [], flashes = [], reactions = [];
 const declined = new Set();
 let timing = null, pendingFixes = [], pendingSuggestions = [];
 const settled = () => timing !== null && timing.mid_thought < 0.5 && timing.interrupt >= 0.3;
@@ -150,6 +164,7 @@ function render() {
     label.style.left = `${Math.max(0, Math.min(first.left - sheet.left, sheet.width - label.offsetWidth))}px`;
   }
   renderThread(sheet);
+  renderReactions(sheet);
   headersBox.innerHTML = Object.entries(FIELDS).map(([field, name]) => {
     const entries = headers.filter((header) => header.field === field).map((header) => escape(header.text));
     return entries.length ? `<div><b>${name}:</b>${entries.join("; ")}</div>` : "";
@@ -171,6 +186,47 @@ function renderThread(sheet) {
   card.innerHTML = lines.join("");
   card.style.top = `${span.getClientRects()[0].top - sheet.top - 4}px`;
   commentsLayer.appendChild(card);
+}
+
+function characterRect(offset) {
+  const walker = document.createTreeWalker(backdrop, NodeFilter.SHOW_TEXT);
+  let remaining = offset;
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    if (remaining < node.length) {
+      const range = document.createRange();
+      range.setStart(node, remaining);
+      range.setEnd(node, remaining + 1);
+      return range.getClientRects()[0];
+    }
+    remaining -= node.length;
+  }
+  return null;
+}
+
+function renderReactions(sheet) {
+  const text = editor.value;
+  const caret = editor.selectionStart;
+  for (const reaction of reactions) relocate(reaction);
+  for (const gone of reactions.filter((reaction) => !stillThere(reaction))) gone.element?.remove();
+  reactions = reactions.filter(stillThere);
+  for (const reaction of reactions) {
+    const rect = characterRect(reaction.end - 1);
+    if (!rect) continue;
+    if (!reaction.element) {
+      reaction.element = document.createElement("div");
+      reaction.element.className = "reaction";
+      reaction.element.textContent = reaction.emoji;
+      reaction.element.style.setProperty("--probability", reaction.probability);
+      reactionsLayer.appendChild(reaction.element);
+    }
+    const lineStart = text.lastIndexOf("\n", reaction.start - 1) + 1;
+    const lineEnd = text.indexOf("\n", reaction.end) < 0 ? text.length : text.indexOf("\n", reaction.end);
+    const endsLine = !text.slice(reaction.end, lineEnd).trim() && (caret < lineStart || caret > lineEnd);
+    reaction.element.style.left = `${endsLine ? Math.min(rect.right - sheet.left + 6, sheet.width + 4) : sheet.width + 4}px`;
+    reaction.element.style.top = `${rect.top - sheet.top + rect.height / 2}px`;
+    reaction.element.dataset.ref = `reaction:${reaction.start}`;
+    reaction.element.dataset.refData = `${reaction.emoji} on '${reaction.text}', P=${reaction.probability.toFixed(2)}`;
+  }
 }
 
 function previousSentence(text, position) {
@@ -250,6 +306,7 @@ function applyEdit(start, end, replacement, key) {
   history.push({ key, headers: headers.slice(), start, inserted: replacement, removed: before.slice(start, end), context: before.slice(Math.max(0, start - 40), start) });
   const caret = editor.selectionStart;
   const shift = replacement.length - (end - start);
+  for (const reaction of reactions) if (reaction.text === before.slice(start, end)) reaction.text = replacement;
   replaceAll(before.slice(0, start) + replacement + before.slice(end), caret >= end ? caret + shift : caret);
 }
 
@@ -326,10 +383,14 @@ async function findNotes() {
   const request = ++notesRequest;
   const comment = thread && thread.answer && !thread.reply ? thread.answer : "";
   const breaks = thread && stillThere(thread.anchor) ? [thread.anchor.end] : [];
-  const result = await post("/notes", { text, comment, breaks });
+  const result = await post("/notes", { text, comment, breaks, goal: currentGoal() });
   if (request !== notesRequest || editor.value !== text) return;
   notes = result.notes;
   timing = result.timing;
+  const limit = typingStart();
+  for (const reaction of result.reactions) {
+    if (reactions.length < MAX_REACTIONS && reaction.end <= limit && !reactions.some((other) => other.text === reaction.text)) reactions.push(reaction);
+  }
   applyPendingFixes();
   liftNotes();
   render();
