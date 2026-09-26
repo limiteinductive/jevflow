@@ -63,6 +63,8 @@ class ComponentNote(BaseModel):
     """`span` without the pasted reference."""
     component: str
     """The clicked component's data and visible text, as the page snapshotted them."""
+    text: str
+    """The copied draft text when the reference is a span, else empty."""
     sentence: str
     paragraph: str
     goal: str
@@ -124,7 +126,7 @@ async def revise(reply: Reply) -> dict:
 
 @app.post("/component")
 async def component(note: ComponentNote) -> dict:
-    return asdict(await decide.about_component(note.span, note.question, note.component, note.sentence, note.paragraph, note.goal, memory.context()))
+    return asdict(await decide.about_component(note.span, note.question, note.component, note.text, note.sentence, note.paragraph, note.goal, memory.context()))
 
 
 class Probe(BaseModel):

@@ -417,21 +417,26 @@ async def revise(sentence: str, comment: str, reply: str, proposed: str, memory:
     return replacement if replacement and min(check.values()) >= FIX_THRESHOLD else None
 
 
-async def about_component(span: str, question: str, component: str, sentence: str, paragraph: str, goal: str, memory: str) -> ComponentReply:
+async def about_component(span: str, question: str, component: str, text: str, sentence: str, paragraph: str, goal: str, memory: str) -> ComponentReply:
     """What the writer meant by typing `span` with a pasted reference to a page component, and the coworker's answer when it is a question.
 
-    `question` is `span` without the reference. The answer and the yes/no probe run while Jev decides the intent, so neither costs an extra round.
+    `question` is `span` without the reference; `text` is the copied draft text when the reference is a span, else empty. Only a span gets the yes/no probe; a yes/no question
+    about any other component gets the coworker's answer. The answer and the probe run while Jev decides the intent, so neither costs an extra round.
     """
     Intent = create_model(
         "Intent",
         __doc__=f"A writer pasted a reference to a part of their writing assistant's page into their draft. That part: {component}. They typed: '{span}'.",
         intent=(ComponentIntent, Field(description="yes_no: they ask a yes or no question about that part; question: they ask an open question about it; instruction: they ask to change, drop, forget or mark it done; mention: it is part of the text they are writing.")),
     )
-    intent, reply, probed = await asyncio.gather(run(Intent, f"Typed: {span}"), answer(sentence or paragraph, paragraph, f"{span} ({component})", goal, memory), probe(question, component))
-    yes_no = intent["intent"] == "yes_no"
+    intent, reply, probed = await asyncio.gather(
+        run(Intent, f"Typed: {span}"), answer(sentence or paragraph, paragraph, f"{span} ({component})", goal, memory), probe(question, text) if text else asyncio.sleep(0, None)
+    )
+    probing = intent["intent"] == "yes_no" and probed is not None
     feed.act(intent, "applied", "intent")
-    feed.act(probed, "shown" if yes_no else "silent", "answer")
-    return ComponentReply(intent["intent"], reply if intent["intent"] == "question" else None, probed["answer"] if yes_no else None)
+    if probed is not None:
+        feed.act(probed, "shown" if probing else "silent", "answer")
+    asks = intent["intent"] in ("question", "yes_no") and not probing
+    return ComponentReply(intent["intent"], reply if asks else None, probed["answer"] if probing else None)
 
 
 async def probe(question: str, text: str) -> dict[str, float | str]:

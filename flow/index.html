@@ -899,11 +899,11 @@ async function handleRef(found) {
   const anchor = previousSentence(editor.value, span.start);
   const { ref, component } = found.snapshot;
   const question = span.text.replace(new RegExp(REF_TOKEN.source), "").trim();
-  const result = await post("/component", { span: span.text, question, component, sentence: anchor.text, paragraph: editor.value.slice(Math.max(0, span.start - 400), span.start), goal: currentGoal() });
+  const result = await post("/component", { span: span.text, question, component, text: found.snapshot.span ? found.snapshot.span.text : "", sentence: anchor.text, paragraph: editor.value.slice(Math.max(0, span.start - 400), span.start), goal: currentGoal() });
   if (result.intent === "mention" || !stillThere(span)) return;
   const [start, end] = removalRange(editor.value, span);
   applyEdit(start, end, "", `note ${span.text}`);
-  if (result.intent === "yes_no" && found.snapshot.span) {
+  if (result.probability !== null) {
     const probe = { ...found.snapshot.span, question, probability: result.probability, id: probes.length + 1 };
     probes.push(probe);
     render();
