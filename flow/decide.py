@@ -223,7 +223,7 @@ async def decide_note(sentence: str, comment: str, goal: str, enabled: frozenset
         **reply,
         **new_piece,
         **components.fields(),
-        **(reactions.fields(goal) if "reactions" in enabled else {}),
+        **(reactions.fields() if "reactions" in enabled else {}),
         **(memory.fields(sentence) if "memory" in enabled else {}),
         **(claims.fields(goal) if "claims" in enabled else {}),
         **(ideas.fields() if "ideas" in enabled else {}),
@@ -232,33 +232,33 @@ async def decide_note(sentence: str, comment: str, goal: str, enabled: frozenset
         run(NoteGate, f"Sentence: {sentence}"), generator.extract_note(sentence), generator.extract_question(sentence), generator.extract_audience(sentence)
     )
     if "reactions" in enabled:
-        reactions.record(sentence, goal, gate)
+        reactions.record(sentence, gate)
     meta_sentences[sentence] = gate["for_assistant"]
     if "claims" in enabled:
         claims.record(sentence, goal, gate)
     if components.record(sentence, gate):
         return None
     if "memory" in enabled and memory.record(sentence, gate):
-        feed.act(gate, "applied", "memory_forget")
+        feed.act(gate, "applied", "memory_forget", component="memory")
         return SentenceNote(sentence, gate["memory_forget"], "forget", [])
     if gate.get("reply", 0) >= NOTE_GATE:
-        feed.act(gate, "applied", "reply")
+        feed.act(gate, "applied", "reply", component="replies")
         return SentenceNote(sentence, gate["reply"], "reply", [])
     if gate.get("wants_ideas", 0) >= NOTE_GATE:
-        feed.act(gate, "applied", "wants_ideas")
+        feed.act(gate, "applied", "wants_ideas", component="ideas")
         return SentenceNote(sentence, gate["wants_ideas"], "ideas", [])
     new_page = gate.get("new_piece", 0)
     searches = max(gate["find_page"], gate["open_page"])
     if searches >= NOTE_GATE and new_page < NOTE_GATE:
-        feed.act(gate, "applied", "find_page", "open_page")
+        feed.act(gate, "applied", "find_page", "open_page", component="pages")
         return SentenceNote(sentence, searches, "open" if gate["open_page"] >= gate["find_page"] else "find", [])
     asks = min(gate["asks"], gate["is_question"])
     field = "new_page" if new_page >= NOTE_GATE else "question" if asks >= NOTE_GATE else gate["field"]
     probability = max(gate["plan"], asks, new_page)
     if probability < NOTE_GATE:
-        feed.act(gate, "silent", "plan", "asks")
+        feed.act(gate, "silent", "plan", "asks", component="notes")
         return None
-    feed.act(gate, "applied", {"question": "asks", "new_page": "new_piece"}.get(field, "plan"), "field")
+    feed.act(gate, "applied", {"question": "asks", "new_page": "new_piece"}.get(field, "plan"), "field", component={"question": "replies", "new_page": "pages"}.get(field, "notes"))
     if field == "undo":
         return SentenceNote(sentence, probability, "undo", []) if len(sentence.split()) <= MAX_NOTE_WORDS else None
     if field == "question":
@@ -283,7 +283,7 @@ async def decide_note(sentence: str, comment: str, goal: str, enabled: frozenset
 
     def headers(field: HeaderField, fallback: str) -> list[Header]:
         fair = min(header_check["fair"], 1 - header_check["adds"]) >= NOTE_THRESHOLD
-        feed.act(header_check, "applied" if fair else "dropped", *decisive)
+        feed.act(header_check, "applied" if fair else "dropped", *decisive, component="notes")
         return [Header(field, header if fair else fallback)] + ([Header("audience", audience)] if names_audience and header_check["audience"] >= NOTE_THRESHOLD else [])
 
     if field == "new_page" and gate["names_piece"] < NOTE_GATE:
@@ -298,10 +298,10 @@ async def decide_note(sentence: str, comment: str, goal: str, enabled: frozenset
     check, header_check = await asyncio.gather(run(NoteCheck, f"Sentence: {sentence}"), run(HeaderCheck, f"Note: {note}\n\nHeader: {header}"))
     if note not in sentence or min(check["only_note"], check["whole_note"]) < NOTE_THRESHOLD:
         if check["sentence_only_note"] < NOTE_THRESHOLD:
-            feed.act(check, "dropped", "sentence_only_note")
+            feed.act(check, "dropped", "sentence_only_note", component="notes")
             return None
         note = sentence
-    feed.act(check, "applied", "only_note", "whole_note")
+    feed.act(check, "applied", "only_note", "whole_note", component="notes")
     return SentenceNote(note, probability, field, headers(field, note))
 
 
@@ -322,9 +322,9 @@ async def question_span(sentence: str, question: str) -> str | None:
     )
     check = await run(QuestionCheck, f"Typed: {sentence}")
     if max(check["about_own_draft"], check["about_assistant"]) < OWN_DRAFT_GATE:
-        feed.act(check, "dropped", "about_own_draft", "about_assistant")
+        feed.act(check, "dropped", "about_own_draft", "about_assistant", component="replies")
         return None
-    feed.act(check, "applied", "about_own_draft", "whole_question")
+    feed.act(check, "applied", "about_own_draft", "whole_question", component="replies")
     return span if span == sentence or check["whole_question"] >= NOTE_THRESHOLD else sentence
 
 
@@ -343,7 +343,7 @@ async def timing(text: str, goal: str, enabled: frozenset[str]) -> Timing:
     )
     moment = await run(Moment, f"Draft end: {text[-TIMING_CONTEXT_CHARS:]}")
     memory.recall(found, moment)
-    feed.act(moment, "applied" if moment["mid_thought"] < MID_THOUGHT_GATE and moment["interrupt"] >= INTERRUPT_GATE else "silent", "mid_thought", "interrupt")
+    feed.act(moment, "applied" if moment["mid_thought"] < MID_THOUGHT_GATE and moment["interrupt"] >= INTERRUPT_GATE else "silent", "mid_thought", "interrupt", component=None)
     return Timing(moment["mid_thought"], moment["interrupt"])
 
 
@@ -396,20 +396,20 @@ async def decide_fix(sentence: str, draft: str, goal: str, categories: list[str]
     check = await run(FixCheck, f"Sentence: {sentence}" + (f"\n\nCorrection: {replacement}" if corrects else ""))
     keeps_register = corrects and min(check["lowercase"], check["capitalizes"]) < NOTE_GATE
     if keeps_register and min(check["keeps_meaning"], check["same_voice"], check["small"], check["real_mistake"], 1 - check["on_purpose"]) >= FIX_THRESHOLD:
-        feed.act(check, "applied", "keeps_meaning", "same_voice", "small", "real_mistake", "on_purpose", "lowercase", "capitalizes")
+        feed.act(check, "applied", "keeps_meaning", "same_voice", "small", "real_mistake", "on_purpose", "lowercase", "capitalizes", component="corrections")
         return replacement, None
     hurt = [(check[f"hurts_{index}"], category) for index, category in enumerate(categories) if check[f"hurts_{index}"] >= HURTS_THRESHOLD]
     hurts = [f"hurts_{index}" for index in range(len(categories)) if check[f"hurts_{index}"] >= HURTS_THRESHOLD]
     if not hurt:
-        feed.act(check, "dropped" if corrects else "silent", *check)
+        feed.act(check, "dropped" if corrects else "silent", *check, component="corrections")
         return None, None
     against = " and ".join(f"'{category}'" for _, category in hurt)
     comment = f"heads up: for {goal}, this one works against {against}."
     rewrite = await revise(sentence, comment, "ok", "", "")
     if rewrite is None or rewrite == sentence:
-        feed.act(check, "dropped", *hurts)
+        feed.act(check, "dropped", *hurts, component="corrections")
         return None, None
-    feed.act(check, "shown", *hurts)
+    feed.act(check, "shown", *hurts, component="corrections")
     return None, GoalSuggestion(rewrite, comment, [Measure(category, f"1 minus P(yes) for: Does the sentence make the text less {category}?", 1 - probability) for probability, category in hurt])
 
 
@@ -475,10 +475,10 @@ async def answer(sentence: str, paragraph: str, question: str, goal: str, memory
         elif retries:
             retries -= 1
         else:
-            feed.act(check, "dropped", *(f"answers_{index}" for index in range(len(drafts))))
+            feed.act(check, "dropped", *(f"answers_{index}" for index in range(len(drafts))), component="replies")
             return Answer("", [], meta["scope"])
-    feed.act(check, "shown", *(f"{name}_{drafts.index(ranked[0][2])}" for name in ("answers", "specific", "voice")))
-    feed.act(meta, "shown" if meta["kind"] == "understand" else "silent", "kind", "reader_gets")
+    feed.act(check, "shown", *(f"{name}_{drafts.index(ranked[0][2])}" for name in ("answers", "specific", "voice")), component="replies")
+    feed.act(meta, "shown" if meta["kind"] == "understand" else "silent", "kind", "reader_gets", component="replies")
     measures = [Measure("answers", "Does the reply answer the writer's question?", ranked[0][1])]
     if meta["kind"] == "understand":
         measures.insert(0, Measure("understood", f"Would {reader} get what the sentence means?", meta["reader_gets"]))
@@ -510,7 +510,7 @@ async def revise(sentence: str, comment: str, reply: str, proposed: str, memory:
         keeps_style=(YesNo, Field(description="Does the rewrite keep the writer's casing and style?")),
     )
     check = await run(ReviseCheck, f"Sentence: {sentence}\n\nRewrite: {replacement}")
-    feed.act(check, "applied" if replacement and min(check.values()) >= FIX_THRESHOLD else "dropped", min(check, key=check.get))
+    feed.act(check, "applied" if replacement and min(check.values()) >= FIX_THRESHOLD else "dropped", min(check, key=check.get), component="replies")
     return replacement if replacement and min(check.values()) >= FIX_THRESHOLD else None
 
 
@@ -530,10 +530,10 @@ async def rewrite(sentence: str, pattern: str) -> Rewrite | None:
         if check[f"keeps_meaning_{index}"] >= FIX_THRESHOLD and 1 - check[f"uses_pattern_{index}"] >= FIX_THRESHOLD
     ]
     if not passing:
-        feed.act(check, "dropped", *check)
+        feed.act(check, "dropped", *check, component="flags")
         return None
     _, best = max(passing)
-    feed.act(check, "applied", f"keeps_meaning_{best}", f"uses_pattern_{best}")
+    feed.act(check, "applied", f"keeps_meaning_{best}", f"uses_pattern_{best}", component="flags")
     return Rewrite(drafts[best], check[f"keeps_meaning_{best}"], check[f"uses_pattern_{best}"])
 
 
@@ -565,9 +565,9 @@ async def about_component(span: str, question: str, component: str, text: str, s
         pick_option(question, text) if text else asyncio.sleep(0, None),
     )
     probing = intent["intent"] == "yes_no" and probed is not None
-    feed.act(intent, "applied", "intent")
+    feed.act(intent, "applied", "intent", component="replies")
     if probed is not None:
-        feed.act(probed, "shown" if probing else "silent", "answer")
+        feed.act(probed, "shown" if probing else "silent", "answer", component="probes")
     choosing = intent["intent"] == "question" and picked is not None
     asks = intent["intent"] in ("question", "yes_no", "reply", "set_target") and not probing and not choosing
     options, pick = picked if choosing else (None, None)
@@ -589,7 +589,7 @@ async def pick_option(question: str, text: str) -> tuple[list[str], str] | None:
     )
     check = await run(OptionPick, f"Text: {text}\n\nQuestion: {question}")
     fits = check["fits"] >= OPTION_FIT
-    feed.act(check, "shown" if fits else "dropped", "pick", "fits")
+    feed.act(check, "shown" if fits else "dropped", "pick", "fits", component="probes")
     return (options, check["pick"]) if fits else None
 
 
@@ -613,5 +613,5 @@ async def edit_header(field: str, entries: list[str], comment: str) -> list[str]
     )
     check = await run(HeaderEdit, f"Comment: {comment}\n\nOld: {'; '.join(entries)}\n\nNew: {'; '.join(proposed)}")
     applied = min(check["follows"], check["keeps"]) >= HEADER_EDIT_THRESHOLD
-    feed.act(check, "applied" if applied else "dropped", "follows", "keeps")
+    feed.act(check, "applied" if applied else "dropped", "follows", "keeps", component="notes")
     return proposed if applied else None

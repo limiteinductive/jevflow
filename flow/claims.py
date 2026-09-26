@@ -76,7 +76,7 @@ async def correct(sentence: str) -> Correction | None:
     check = await jev.run(CorrectionCheck, f"Sentence: {sentence}")
     _, index = max((check[f"true_{index}"] * check[f"minimal_{index}"], index) for index in range(len(drafts)))
     accepted = min(check[f"true_{index}"], check[f"minimal_{index}"]) >= SWAP_THRESHOLD
-    feed.act(check, "shown" if accepted else "dropped", f"true_{index}", f"minimal_{index}")
+    feed.act(check, "shown" if accepted else "dropped", f"true_{index}", f"minimal_{index}", component="claims")
     return Correction(drafts[index], check[f"true_{index}"]) if accepted else None
 
 

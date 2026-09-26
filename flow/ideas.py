@@ -54,5 +54,5 @@ async def find(text: str, goal: str, context: str, shown: list[str]) -> list[Ide
     check = await jev.run(IdeaCheck, f"Draft: {text}")
     scores = {index: math.prod(check[f"{name}_{index}"] for name in CHECKS) for index in range(len(angles)) if min(check[f"{name}_{index}"] for name in FLOORED) >= IDEA_FLOOR}
     kept = sorted(scores, key=scores.get, reverse=True)[:NUM_SHOWN]
-    feed.act(check, "shown" if kept else "dropped", *(f"{name}_{index}" for index in kept or range(len(angles)) for name in CHECKS))
+    feed.act(check, "shown" if kept else "dropped", *(f"{name}_{index}" for index in kept or range(len(angles)) for name in CHECKS), component="ideas")
     return [Idea(angles[index], scores[index], [decide.Measure(name, questions[f"{name}_{index}"], check[f"{name}_{index}"]) for name in CHECKS]) for index in kept]

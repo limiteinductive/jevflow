@@ -13,7 +13,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from flow import claims, components, decide, feed, gauges, ideas, memory, reactions
+from flow import claims, components, decide, feed, gauges, ideas, memory, reactions, titles
 from flow.components import ComponentName
 from mirror.model import Stacker
 from mirror.scan import scan
@@ -27,6 +27,7 @@ app.include_router(gauges.router)
 app.include_router(feed.router)
 app.include_router(memory.router)
 app.include_router(components.router)
+app.include_router(titles.router)
 stacker = Stacker.load()
 
 
@@ -123,7 +124,7 @@ async def notes(draft: CommentedDraft) -> dict:
     return {
         "notes": [asdict(note) for note in found],
         "timing": asdict(timing),
-        "reactions": [asdict(reaction) for reaction in reactions.find(sentences, draft.goal, found)] if "reactions" in enabled else [],
+        "reactions": [asdict(reaction) for reaction in await reactions.find(sentences, draft.goal, found)] if "reactions" in enabled else [],
         "mash": [asdict(mash) for mash in await reactions.find_mash(sentences, draft.goal)] if "reactions" in enabled else [],
         "toggles": [asdict(toggle) for toggle in components.find(sentences)],
         "memory": memory.state(),
@@ -192,7 +193,7 @@ class Probe(BaseModel):
 @app.post("/probe")
 async def probe(probe: Probe) -> dict:
     answers = await decide.probe(probe.question, probe.text)
-    feed.act(answers, "shown", "answer")
+    feed.act(answers, "shown", "answer", component="probes")
     return {"probability": answers["answer"]}
 
 
