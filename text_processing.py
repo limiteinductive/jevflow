@@ -65,7 +65,7 @@ class Paragraph:
 
 def split_sentences(text: str) -> list[Sentence]:
     """
-    Split text into sentences with character offsets.
+    Split text into sentences with character offsets; a sentence ends at ". ", "! ", "? " or a line break.
     Uses regex that handles common abbreviations.
     """
     paragraphs = split_paragraphs(text)
@@ -74,8 +74,7 @@ def split_sentences(text: str) -> list[Sentence]:
 
     for para in paragraphs:
         para_text = para.text
-        # Simple sentence split on ". " or "! " or "? "
-        raw_parts = re.split(r'(?<=[.!?])\s+', para_text)
+        raw_parts = re.split(r'(?<=[.!?])\s+|\s*\n\s*', para_text)
         # Rejoin false splits on abbreviations
         parts = []
         abbrevs = {'dr', 'mr', 'mrs', 'ms', 'prof', 'jr', 'sr', 'st', 'vs', 'etc', 'e.g', 'i.e', 'u.s', 'u.k'}

@@ -151,14 +151,12 @@ sentence_fixes: dict[tuple[str, str], tuple[str | None, GoalSuggestion | None]] 
 
 def line_sentences(text: str, breaks: list[int]) -> list[Sentence]:
     """Sentences with offsets in `text`, never spanning a line break or an offset in `breaks`: the page ends a sentence at a newline and at a comment thread's anchor."""
-    sentences = []
     positions = [0, *sorted(position for position in breaks if 0 < position < len(text)), len(text)]
-    for chunk_start, chunk_end in pairwise(positions):
-        line_start = chunk_start
-        for line in text[chunk_start:chunk_end].split("\n"):
-            sentences += [replace(sentence, start=line_start + sentence.start, end=line_start + sentence.end) for sentence in split_sentences(line)]
-            line_start += len(line) + 1
-    return sentences
+    return [
+        replace(sentence, start=chunk_start + sentence.start, end=chunk_start + sentence.end)
+        for chunk_start, chunk_end in pairwise(positions)
+        for sentence in split_sentences(text[chunk_start:chunk_end])
+    ]
 
 
 async def run(output_type: type[BaseModel], prompt: str) -> dict[str, float | str]:
