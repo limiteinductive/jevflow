@@ -48,7 +48,7 @@ sentence_claims: dict[tuple[str, str], tuple[float, asyncio.Task[Correction | No
 def fields(goal: str) -> dict:
     """The claim questions, as pydantic fields to add to the note gate."""
     return {
-        "claim": (Literal["yes", "no"], Field(description="Does the sentence state a checkable fact about the world?")),
+        "claim": (Literal["yes", "no"], Field(description="Does the sentence state a fact about the world that a knowledgeable stranger could check without knowing the writer?")),
         "true": (Literal["yes", "no"], Field(description="Is what the sentence states about the world true?")),
     }
 
