@@ -251,7 +251,8 @@ function removalRange(text, note) {
 
 function liftNotes() {
   const limit = typingStart();
-  const ready = notes.filter((note) => stillThere(note) && note.end <= limit && !declined.has(`note ${note.text}`)).sort((first, second) => second.start - first.start);
+  const typedPast = (note) => note.end <= limit || (note.field === "undo" && /^\s+$/.test(editor.value.slice(note.end, editor.selectionStart)));
+  const ready = notes.filter((note) => stillThere(note) && typedPast(note) && !declined.has(`note ${note.text}`)).sort((first, second) => second.start - first.start);
   for (const note of ready) {
     notes = notes.filter((other) => other !== note);
     if (note.field === "question" || note.field === "reply") {
