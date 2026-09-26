@@ -284,13 +284,23 @@
   .track b { background: #F386A1; }
   .track i { display: none; }
   @keyframes acted { from { background: #3C2D30; } }
-  #pages { background: var(--surface); backdrop-filter: none; -webkit-backdrop-filter: none; border-right: var(--rule); font: 14px/1.4 var(--sans); }
+  #pages { display: flex; flex-direction: column; background: var(--surface); backdrop-filter: none; -webkit-backdrop-filter: none; border-right: var(--rule); font: 14px/1.4 var(--sans); }
   #new-page { margin-bottom: 12px; padding: 4px 8px; border-bottom: var(--rule); color: var(--ink); font: 13px/1.4 var(--mono); }
   #new-page:hover { color: var(--ink); text-decoration: underline; }
   #page-list li { border-radius: 0; color: var(--soft); }
   #page-list li:hover { color: var(--ink); }
   #page-list li.current { background: none; color: var(--ink); font-weight: 600; }
   #saved { border-radius: 0; background: var(--ok); }
+  #components-panel { margin: auto 0 16px; border: var(--rule); }
+  #components-panel h3 { margin: 0; padding: 2px 8px; background: var(--bar-bg); color: var(--bar-text); font: 400 11px/1.6 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; }
+  #component-list { margin: 0; padding: 0; list-style: none; }
+  #component-list li { display: flex; align-items: center; gap: 8px; padding: 4px 8px; font: 12px/1.4 var(--mono); color: var(--ink); }
+  #component-list li + li { border-top: 1px solid var(--muted); }
+  #component-list li::before { content: ""; flex: none; width: 10px; height: 10px; box-sizing: border-box; border: 2px solid var(--line); background: var(--accent); }
+  #component-list li.off { color: var(--muted); }
+  #component-list li.off::before { border-color: var(--muted); background: none; }
+  #component-list li.toggled { animation: toggled 1.2s ease-out; }
+  @keyframes toggled { from { background: var(--accent); color: #1E1E1E; } }
 </style>
 </head>
 <body>
@@ -310,7 +320,7 @@
 <button id="feed-toggle" tabindex="-1" title="Decisions (Cmd+J)" aria-label="Decisions"><svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="7" width="2.4" height="6"/><rect x="5.8" y="2" width="2.4" height="11"/><rect x="10.6" y="5" width="2.4" height="8"/></svg></button>
 <i id="saved" aria-hidden="true"></i>
 <button id="pages-toggle" tabindex="-1" title="Pages" aria-label="Pages">≡</button>
-<nav id="pages" aria-label="Pages"><button id="new-page" tabindex="-1" title="New page" aria-label="New page">new page</button><ul id="page-list"></ul></nav>
+<nav id="pages" aria-label="Pages"><button id="new-page" tabindex="-1" title="New page" aria-label="New page">new page</button><ul id="page-list"></ul><section id="components-panel" aria-label="Components"><h3>components</h3><ul id="component-list"></ul></section></nav>
 <aside id="feed" aria-label="Decisions">
   <div class="feed-totals">
     <div><b><span id="feed-decisions">0</span><small id="feed-replays"></small></b>decisions</div>
@@ -1226,6 +1236,22 @@ pageList.addEventListener("click", (event) => {
 document.getElementById("new-page").addEventListener("click", () => openNewPage([]));
 document.getElementById("pages-toggle").addEventListener("click", () => { document.body.classList.toggle("pages-open"); setTimeout(render, 360); });
 if (window.innerWidth > 1100) document.body.classList.add("pages-open");
+
+const componentList = document.getElementById("component-list");
+
+function renderComponents() {
+  componentList.innerHTML = Object.entries(components).map(([name, does]) => `<li data-ref="component:${attribute(name)}" data-ref-data="${attribute(does)}" class="${isOn(name) ? "" : "off"}" title="${attribute(does)}">${escape(name)}</li>`).join("");
+}
+
+componentList.addEventListener("click", (event) => {
+  const name = event.target.closest("[data-ref]")?.dataset.ref.slice("component:".length);
+  if (name) setComponent(name, !isOn(name));
+});
+window.addEventListener("components-loaded", renderComponents);
+window.addEventListener("component-toggle", (event) => {
+  renderComponents();
+  componentList.querySelector(`[data-ref="component:${CSS.escape(event.detail.name)}"]`)?.classList.add("toggled");
+});
 
 restorePage();
 render();
