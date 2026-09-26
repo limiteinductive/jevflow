@@ -348,7 +348,7 @@ async def decide_fix(sentence: str, draft: str, goal: str, categories: list[str]
         fields.update(
             keeps_meaning=(YesNo, Field(description="Does the correction keep every fact and the meaning of the sentence?")),
             same_voice=(YesNo, Field(description="Does the correction still sound like the writer?")),
-            small=(YesNo, Field(description="Does the correction only fix mistakes, changing as few words as possible?")),
+            small=(YesNo, Field(description="Does the correction change only the words that had mistakes, leaving every other word as the writer wrote it?")),
             real_mistake=(YesNo, Field(description="Does the correction fix a real mistake in the sentence?")),
             on_purpose=(YesNo, Field(description="Does the correction change a spelling or word the writer chose on purpose, for voice or a joke (like 'akshually' or 'gonna')?")),
             lowercase=(YesNo, Field(description="Is the draft written in lowercase on purpose, like casual texting, with sentences starting lowercase?")),

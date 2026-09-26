@@ -27,13 +27,18 @@ AUDIENCE_EXAMPLES = [
     ("im writing a blog post about our launch", "none"),
 ]
 FIX_INSTRUCTIONS = (
-    "Fix spelling, grammar and punctuation mistakes in the user's sentence. Change nothing else: keep the writer's words, slang and tone. "
+    "Fix every spelling, grammar and punctuation mistake in the user's sentence: typos, doubled or missing letters, wrong words like their or its, "
+    "verb forms, pronoun case and missing hyphens. Change nothing else: keep the writer's words, slang and tone. "
     "If nothing is wrong, reply with the sentence unchanged. Reply with the sentence only."
 )
 FIX_EXAMPLES = [
     ("we shiped it friday and nobody noticed", "we shipped it Friday and nobody noticed"),
     ("Honestly the new build is way faster lol", "Honestly the new build is way faster lol"),
     ("their going to love this feature, its so fast", "they're going to love this feature, it's so fast"),
+    ("I realy hope the demo goes welll tomorow.", "I really hope the demo goes well tomorrow."),
+    ("Me and her has wrote the first draft already.", "She and I have written the first draft already."),
+    ("We found a second hand bike at the nieghborhood market.", "We found a second-hand bike at the neighborhood market."),
+    ("gonna grab coffee first, brb", "gonna grab coffee first, brb"),
 ]
 VOICE = (
     "You are a writing coworker who texts the writer like a sharp friend. "
