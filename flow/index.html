@@ -58,6 +58,7 @@
   .ask { pointer-events: auto; cursor: pointer; }
   .ask .percent { font: 600 11px var(--mono, ui-monospace); margin-right: 0.45rem; }
   .ask.rewriting { opacity: 0.5; }
+  .ask.kept .percent::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 4px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px currentColor; }
   #gauges { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px 4px; margin: -1.4rem 0 2.2rem; padding: 10px 12px 8px; border: 1px solid var(--card-edge); border-radius: 12px; background: var(--card-bg); font: 11.5px/1.3 -apple-system, "Helvetica Neue", sans-serif; color: var(--faint); transition: opacity 0.5s; }
   #gauges:empty { display: none; }
   .gauge { position: relative; width: 74px; text-align: center; transition: opacity 0.5s, transform 0.5s; }
@@ -433,7 +434,7 @@ function render() {
     if (!span) continue;
     const first = span.getClientRects()[0];
     const label = document.createElement("div");
-    label.className = "ask";
+    label.className = insight.kept ? "ask kept" : "ask";
     label.dataset.start = insight.start;
     label.dataset.ref = `insight:${insight.start}`;
     label.dataset.refData = `${insight.reasons.join(" · ")} ${Math.round(100 * insight.probability)}%`;
@@ -596,11 +597,11 @@ async function openThread(anchor, question) {
 
 async function rewriteInsight(insight, label) {
   label.classList.add("rewriting");
-  const result = await post("/revise", { sentence: insight.text, comment: `${insight.ask} Avoid: ${insight.reasons.join(", ")}.`, reply: "yes, rewrite it", proposed: "" });
-  if (!result.replacement || !stillThere(insight)) { label.classList.remove("rewriting"); return; }
-  applyEdit(insight.start, insight.end, result.replacement, `revise ${insight.text} ${result.replacement}`);
+  const { rewrite } = await post("/rewrite", { sentence: insight.text, pattern: insight.reasons[0] });
+  if (!rewrite || !stillThere(insight)) { insight.kept = true; render(); return; }
+  applyEdit(insight.start, insight.end, rewrite.text, `revise ${insight.text} ${rewrite.text}`);
   insights = insights.filter((other) => other !== insight);
-  const flash = { start: insight.start, end: insight.start + result.replacement.length, text: result.replacement };
+  const flash = { start: insight.start, end: insight.start + rewrite.text.length, text: rewrite.text };
   flashes.push(flash);
   setTimeout(() => { flashes = flashes.filter((other) => other !== flash); render(); }, FLASH_MS);
   render();

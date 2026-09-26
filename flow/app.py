@@ -136,6 +136,18 @@ async def answer(question: Question) -> dict:
     return asdict(await decide.answer(question.sentence, question.paragraph, question.question, question.goal, memory.context(), components.context(enabled)))
 
 
+class Flagged(BaseModel):
+    sentence: str
+    pattern: str
+    """The insight's strongest reason, such as "'not just X, but Y' pattern"."""
+
+
+@app.post("/rewrite")
+async def rewrite(flagged: Flagged) -> dict:
+    found = await decide.rewrite(flagged.sentence, flagged.pattern)
+    return {"rewrite": asdict(found) if found else None}
+
+
 @app.post("/revise")
 async def revise(reply: Reply) -> dict:
     return {"replacement": await decide.revise(reply.sentence, reply.comment, reply.reply, reply.proposed, memory.context())}

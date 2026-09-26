@@ -108,6 +108,14 @@ class Measure:
 
 
 @dataclass(frozen=True)
+class Rewrite:
+    text: str
+    keeps_meaning: float
+    uses_pattern: float
+    """P(the rewrite still reads as the flagged pattern)."""
+
+
+@dataclass(frozen=True)
 class Answer:
     text: str
     """The coworker's words, written by the local model."""
@@ -469,6 +477,29 @@ async def revise(sentence: str, comment: str, reply: str, proposed: str, memory:
     check = await run(ReviseCheck, f"Sentence: {sentence}\n\nRewrite: {replacement}")
     feed.act(check, "applied" if replacement and min(check.values()) >= FIX_THRESHOLD else "dropped", min(check, key=check.get))
     return replacement if replacement and min(check.values()) >= FIX_THRESHOLD else None
+
+
+async def rewrite(sentence: str, pattern: str) -> Rewrite | None:
+    """The local model's best of `NUM_DRAFTS` rewrites of `sentence` without `pattern`, all scored in one Jev payload; None when none keeps the meaning and drops the pattern."""
+    drafts = list(dict.fromkeys(draft for draft in await generator.revisions(sentence, f"It reads as {pattern}. Say what it is as a plain statement, with no contrast against what it is not.", NUM_DRAFTS) if draft and draft != sentence))
+    if not drafts:
+        return None
+    fields = {}
+    for index, draft in enumerate(drafts):
+        fields[f"keeps_meaning_{index}"] = (YesNo, Field(description=f"Does '{draft}' keep the meaning of the sentence?"))
+        fields[f"uses_pattern_{index}"] = (YesNo, Field(description=f"Does '{draft}' still read as {pattern}?"))
+    check = await run(create_model("RewriteCheck", __doc__=f"A writer's sentence reads as {pattern}. Sentence: '{sentence}'. A coworker drafted rewrites.", **fields), f"Sentence: {sentence}")
+    passing = [
+        (check[f"keeps_meaning_{index}"] * (1 - check[f"uses_pattern_{index}"]), index)
+        for index in range(len(drafts))
+        if check[f"keeps_meaning_{index}"] >= FIX_THRESHOLD and 1 - check[f"uses_pattern_{index}"] >= FIX_THRESHOLD
+    ]
+    if not passing:
+        feed.act(check, "dropped", *check)
+        return None
+    _, best = max(passing)
+    feed.act(check, "applied", f"keeps_meaning_{best}", f"uses_pattern_{best}")
+    return Rewrite(drafts[best], check[f"keeps_meaning_{best}"], check[f"uses_pattern_{best}"])
 
 
 async def about_component(span: str, question: str, component: str, text: str, sentence: str, paragraph: str, goal: str, memory: str) -> ComponentReply:
