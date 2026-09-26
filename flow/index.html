@@ -1356,7 +1356,11 @@ function savePage() {
   const state = pageState();
   if (state === lastSaved) return;
   const pages = readPages();
-  pages[currentPage] = { title: currentGoal() || editor.value.trim().split(/\s+/).slice(0, 6).join(" ") || "New page", updatedAt: Date.now(), state: JSON.parse(state), caret: [editor.selectionStart, editor.selectionEnd] };
+  const titled = pages[currentPage]?.titledBy && pages[currentPage].titledBy !== "auto" ? pages[currentPage] : null;
+  pages[currentPage] = {
+    title: titled ? titled.title : currentGoal() || editor.value.trim().split(/\s+/).slice(0, 6).join(" ") || "New page", titledBy: titled ? titled.titledBy : "auto",
+    updatedAt: Date.now(), state: JSON.parse(state), caret: [editor.selectionStart, editor.selectionEnd],
+  };
   try {
     localStorage.setItem(PAGES_KEY, JSON.stringify(pages));
     localStorage.setItem(CURRENT_PAGE_KEY, currentPage);
@@ -1365,6 +1369,14 @@ function savePage() {
   savedDot.classList.remove("landed");
   void savedDot.offsetWidth;
   savedDot.classList.add("landed");
+  renderPages(pages);
+}
+
+function setPageTitle(id, title, titledBy) {
+  const pages = readPages();
+  if (!pages[id]) return;
+  Object.assign(pages[id], { title, titledBy });
+  try { localStorage.setItem(PAGES_KEY, JSON.stringify(pages)); } catch { return; }
   renderPages(pages);
 }
 
