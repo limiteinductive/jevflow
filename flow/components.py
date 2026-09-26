@@ -13,16 +13,27 @@ from flow import feed
 from text_processing import Sentence
 
 COMPONENTS = {
+    "notes": "files what you say about the draft (goal, audience, tone, to do) as headers at the top",
+    "replies": "answers your questions to me in the margin",
+    "pages": "keeps your pages and opens a new one when you start writing something else",
     "corrections": "fixes small mistakes in finished sentences, keeping your voice",
     "gauges": "scores the draft on what matters for your Goal, as rings",
     "reactions": "drops an emoji on a line that lands, like a joke",
     "flags": "highlights sentences that read as AI-written",
     "memory": "remembers facts about you and recalls the ones that matter",
+    "probes": "answers your own yes/no question about a copied selection, as a ring",
+    "feed": "shows every decision live in a column on the right",
 }
-"""Name to one line on what the component does, as the coworker would say it."""
-ComponentName = Literal["corrections", "gauges", "reactions", "flags", "memory"]
+"""Name to one line on what the component does, as the coworker would say it. A new component adds its line here."""
+ComponentName = Literal[tuple(COMPONENTS)]
 
 router = APIRouter()
+
+
+def context(enabled: frozenset[str]) -> str:
+    """The components and their on/off state, as lines that prefix the coworker's reply prompt."""
+    lines = "".join(f"- {name} ({'on' if name in enabled else 'off'}): {does}\n" for name, does in COMPONENTS.items())
+    return f"Your features:\n{lines}"
 
 
 @router.get("/components")

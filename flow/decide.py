@@ -190,7 +190,7 @@ async def decide_note(sentence: str, comment: str, goal: str, enabled: frozenset
     A goal or `new_page` note that Jev reads as also naming who the text is for files the audience the local model copied as a second header.
     """
     reply = {"reply": (YesNo, Field(description="Is the writer answering the coworker's comment (agreeing, disagreeing, correcting it or asking for the change) rather than writing the text?"))} if comment else {}
-    new_piece = {"new_piece": (YesNo, Field(description=f"Does the writer say they are now writing something other than the {goal}?"))} if goal else {}
+    new_piece = {"new_piece": (YesNo, Field(description=f"Does the writer say they are now writing something other than the {goal}?"))} if goal and "pages" in enabled else {}
     NoteGate = create_model(
         "NoteGate",
         __doc__=NOTE_CONTEXT + (f" The writer's coworker just commented on the draft: '{comment}'" if comment else ""),
@@ -275,10 +275,11 @@ async def question_span(sentence: str, question: str) -> str | None:
         __doc__=NOTE_CONTEXT + f" The writer typed: '{sentence}'.",
         whole_question=(YesNo, Field(description=f"Does '{span}' hold the whole question, leaving none of its words out?")),
         about_own_draft=(YesNo, Field(description=f"In '{span}', is the writer asking about their own draft (how it reads, whether it works), rather than asking the person the text is for?")),
+        about_assistant=(YesNo, Field(description=f"In '{span}', is the writer asking the writing assistant about itself (what it can do, what it is doing, why it did something)?")),
     )
     check = await run(QuestionCheck, f"Typed: {sentence}")
-    if check["about_own_draft"] < OWN_DRAFT_GATE:
-        feed.act(check, "dropped", "about_own_draft")
+    if max(check["about_own_draft"], check["about_assistant"]) < OWN_DRAFT_GATE:
+        feed.act(check, "dropped", "about_own_draft", "about_assistant")
         return None
     feed.act(check, "applied", "about_own_draft", "whole_question")
     return span if span == sentence or check["whole_question"] >= NOTE_THRESHOLD else sentence
@@ -379,7 +380,7 @@ async def find_fixes(text: str, limit: int, goal: str, categories: list[str]) ->
     return fixes, suggestions
 
 
-async def answer(sentence: str, paragraph: str, question: str, goal: str, memory: str) -> Answer:
+async def answer(sentence: str, paragraph: str, question: str, goal: str, context: str) -> Answer:
     """The coworker's reply to the writer's `question` about `sentence`: the local model drafts `NUM_DRAFTS` in one batch, Jev ranks them on `DRAFT_CHECKS`.
 
     The top-ranked draft is shown unless every draft fails "answers the question"; then the drafts are resampled once.
@@ -395,7 +396,7 @@ async def answer(sentence: str, paragraph: str, question: str, goal: str, memory
     )
     meta_task = asyncio.create_task(run(Meta, f"Paragraph: {paragraph}\n\nLast sentence: {sentence}\n\nQuestion: {question}"))
     for attempt in range(2):
-        drafts = list(dict.fromkeys(await generator.answers(sentence, paragraph, question, goal, NUM_DRAFTS, memory)))
+        drafts = list(dict.fromkeys(await generator.answers(sentence, paragraph, question, goal, NUM_DRAFTS, context)))
         fields = {
             f"{name}_{index}": (YesNo, Field(description=template.format(draft=draft)))
             for index, draft in enumerate(drafts)
