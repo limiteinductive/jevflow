@@ -88,6 +88,7 @@
   body.feed-open #feed { transform: none; }
   .feed-totals { position: sticky; top: 0; z-index: 1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 16px 16px 10px; background: var(--feed-bg); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); border-bottom: 1px solid var(--card-edge); }
   .feed-totals div { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--faint); }
+  .feed-totals b small, .feed-pause header small { font: 500 10px "SF Mono", ui-monospace, Menlo, monospace; color: var(--faint); margin-left: 5px; letter-spacing: 0; }
   .feed-totals b { display: block; font: 600 21px/1.1 "SF Mono", ui-monospace, Menlo, monospace; letter-spacing: -0.02em; color: var(--ink); text-transform: none; }
   .feed-legend { grid-column: 1 / -1; display: flex; gap: 12px; text-transform: none; letter-spacing: 0; }
   .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; flex: none; background: rgb(var(--silent)); }
@@ -114,21 +115,27 @@
   .feed-call h4 { display: flex; align-items: center; gap: 6px; margin: 0 0 3px; font-size: 10.5px; font-weight: 500; color: var(--faint); }
   .feed-call h4 b { color: var(--ink); font-weight: 600; }
   .feed-call h4 span:last-child { margin-left: auto; font-family: "SF Mono", ui-monospace, Menlo, monospace; }
-  .feed-row { display: grid; grid-template-columns: 72px 30px 1fr; gap: 8px; align-items: center; height: 17px; border-radius: 4px; }
+  .feed-row { display: grid; grid-template-columns: minmax(0, 1fr) 76px 38px; gap: 10px; align-items: center; padding: 3px 4px; border-radius: 4px; }
+  .feed-row .key-name { display: block; font: 500 10.5px "SF Mono", ui-monospace, Menlo, monospace; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .feed-row .text { display: block; font-style: italic; }
+  .feed-row .answer { display: flex; flex-direction: column; gap: 3px; }
+  .feed-row .value { text-align: left; }
+  .track { position: relative; height: 2px; border-radius: 1px; background: var(--track); }
+  .track b { position: absolute; inset: 0 auto 0 0; border-radius: 1px; background: rgba(var(--style), 0.55); }
+  .track i { position: absolute; top: 50%; width: 7px; height: 7px; margin: -3.5px 0 0 -3.5px; border-radius: 50%; background: rgb(var(--style)); box-shadow: 0 0 6px rgba(var(--style), 0.6); }
+  .track i.unsure { background: var(--feed-bg); box-shadow: inset 0 0 0 1.5px rgb(var(--style)); }
+  .feed-row.fresh .track b { animation: grow 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) both; animation-delay: calc(var(--index) * 22ms + 80ms); }
+  .feed-row .kind { justify-self: end; margin: 0; }
   .feed-row.fresh { animation: slide 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) both; animation-delay: calc(var(--index) * 22ms); }
   .feed-row .value { font: 600 10.5px "SF Mono", ui-monospace, Menlo, monospace; text-align: right; }
   .feed-row .text { font-size: 10.5px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .glyph { display: flex; align-items: flex-end; gap: 2px; height: 10px; }
-  .glyph.hatch { position: relative; height: 7px; border: 1px solid rgba(var(--style), 0.35); border-radius: 1px; background: repeating-linear-gradient(135deg, rgba(var(--style), 0.14) 0 1px, transparent 1px 4px); }
-  .glyph.hatch b { position: absolute; inset: 0 auto 0 0; background: repeating-linear-gradient(135deg, rgb(var(--style)) 0 1.5px, rgba(var(--style), 0.35) 1.5px 3px); }
-  .feed-row.fresh .glyph.hatch b { animation: grow 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) both; animation-delay: calc(var(--index) * 22ms + 80ms); }
   .glyph.ruler i { flex: 1; min-height: 1px; background: rgba(var(--style), 0.3); border-radius: 1px 1px 0 0; }
   .glyph.ruler i.pick { background: rgb(var(--style)); box-shadow: 0 0 5px rgba(var(--style), 0.6); }
   .glyph.dots { align-items: center; gap: 3px; }
   .glyph.dots i { width: 6px; height: 6px; border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(var(--style), 0.5); }
   .glyph.dots i.pick { background: rgb(var(--style)); box-shadow: 0 0 5px rgba(var(--style), 0.6); }
   .feed-row .kind { font: 500 8.5px "SF Mono", ui-monospace, Menlo, monospace; letter-spacing: 0.08em; opacity: 0.55; margin-right: 5px; }
-  .feed-row .text em { font-style: normal; color: var(--ink); font-weight: 600; margin-right: 4px; }
   .judged { border-radius: 3px; background: rgba(var(--shown), 0.28); box-shadow: 0 0 0 2px rgba(var(--shown), 0.28); }
   .feed-call { cursor: default; }
   .feed-row.key { background: rgba(var(--shown), 0.1); }
@@ -174,7 +181,7 @@
 <button id="feed-toggle" tabindex="-1" title="Decisions (Cmd+J)" aria-label="Decisions"><svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="7" width="2.4" height="6" rx="1"/><rect x="5.8" y="2" width="2.4" height="11" rx="1"/><rect x="10.6" y="5" width="2.4" height="8" rx="1"/></svg></button>
 <aside id="feed" aria-label="Decisions">
   <div class="feed-totals">
-    <div><b id="feed-decisions">0</b>decisions</div>
+    <div><b><span id="feed-decisions">0</span><small id="feed-replays"></small></b>decisions</div>
     <div><b id="feed-median">0.00s</b>median call</div>
     <div><b id="feed-dollars">$0.000</b>cost</div>
     <div class="feed-legend"><span><i class="dot applied"></i> applied</span><span><i class="dot shown"></i> shown</span><span><i class="dot dropped"></i> dropped</span><span><i class="dot silent"></i> silent</span></div>
@@ -697,6 +704,7 @@ async function pollFeed() {
   if (result.version < feedVersion) { feedVersion = 0; feedRecords.clear(); return; }
   feedVersion = result.version;
   document.getElementById("feed-decisions").textContent = result.decisions.toLocaleString();
+  document.getElementById("feed-replays").textContent = result.replays ? `+${result.replays.toLocaleString()} cached` : "";
   document.getElementById("feed-median").textContent = `${result.median_seconds.toFixed(2)}s`;
   document.getElementById("feed-dollars").textContent = `$${result.dollars.toFixed(result.dollars < 0.1 ? 4 : 2)}`;
   if (!result.records.length) return;
@@ -705,10 +713,10 @@ async function pollFeed() {
 }
 
 const attribute = (text) => escape(text).replace(/"/g, "&quot;");
-const KINDS = { "yes/no": "NOUL", score: "SCORE", choice: "CHOICE" };
+const KINDS = { "yes/no": "Noul", score: "Score", choice: "Choice" };
 
 function glyph(question, probability) {
-  if (question.kind === "yes/no") return `<div class="glyph hatch"><b style="width: ${100 * probability}%"></b></div>`;
+  if (question.kind === "yes/no") return `<div class="track"><b style="width: ${100 * probability}%"></b><i class="${probability > 0.4 && probability < 0.6 ? "unsure" : ""}" style="left: ${100 * probability}%"></i></div>`;
   const options = Object.entries(question.distribution);
   if (question.kind === "score") return `<div class="glyph ruler">${options.map(([level, share]) => `<i class="${level === String(question.answer) ? "pick" : ""}" style="height: ${Math.max(10, 100 * share)}%"></i>`).join("")}</div>`;
   return `<div class="glyph dots">${options.map(([option]) => `<i class="${option === String(question.answer) ? "pick" : ""}" title="${attribute(option)}"></i>`).join("")}</div>`;
@@ -731,6 +739,7 @@ function renderFeed() {
   feedPauses.innerHTML = kept.reverse().map((pause) => {
     const records = pauses.get(pause);
     const questions = records.flatMap((record) => record.questions.map((question) => ({ question, record })));
+    const replayed = questions.filter(({ record }) => record.cached).length;
     const live = records.filter((record) => !record.cached);
     const slowest = live.length ? Math.max(...live.map((record) => record.seconds)) : 0;
     const strip = questions.map(({ question, record }, index) => {
@@ -746,12 +755,12 @@ function renderFeed() {
       const rows = ranked.slice(0, FEED_ROWS).map((question) => {
         const { probability, option } = answerBar(question);
         const key = record.decisive.includes(question.name) ? " key" : "";
-        return `<div class="feed-row${key}${fresh ? " fresh" : ""}" style="--index: ${row++}" title="${attribute(question.text)}" data-ref="decision:${record.id}-${question.name}" data-ref-data="${attribute(question.text)} ${Math.round(100 * probability)}%">${glyph(question, probability)}<span class="value">${question.kind === "score" ? escape(option) : probability.toFixed(2)}</span><span class="text"><span class="kind">${KINDS[question.kind]}</span>${option ? `<em>${escape(option)}</em>` : ""}${escape(question.text)}</span></div>`;
+        return `<div class="feed-row${key}${fresh ? " fresh" : ""}" style="--index: ${row++}" title="${attribute(question.text)}" data-ref="decision:${record.id}-${question.name}" data-ref-data="${attribute(question.text)} ${Math.round(100 * probability)}%"><div><span class="key-name">${escape(question.name)}</span><span class="text">${escape(question.text)}</span></div><div class="answer"><span class="value">${question.kind === "yes/no" ? `${Math.round(100 * probability)}% true` : `${escape(option)} ${probability.toFixed(2)}`}</span>${glyph(question, probability)}</div><span class="kind">${KINDS[question.kind]}</span></div>`;
       }).join("");
       const more = record.questions.length > FEED_ROWS ? `<div class="feed-more">+${record.questions.length - FEED_ROWS} more</div>` : "";
       return `<div data-record="${record.id}" class="feed-call ${record.action || ""}${record.cached ? " cached" : ""}${acted}"><h4><i class="dot ${record.action || "pending"}" title="${record.action || "no action"}"></i><b>${escape(record.endpoint)}</b>${escape(record.schema)} · ${record.questions.length}<span>${record.cached ? "cache" : `${record.seconds.toFixed(2)}s`}</span></h4>${rows}${more}</div>`;
     }).join("");
-    return `<section class="feed-pause"><header><span>pause ${pause}</span><b>${questions.length} decisions</b><span class="seconds">${slowest.toFixed(2)} s</span></header><div class="strip">${strip}</div>${calls}</section>`;
+    return `<section class="feed-pause"><header><span>pause ${pause}</span><b>${questions.length - replayed} decisions</b>${replayed ? `<small>+${replayed} cached</small>` : ""}<span class="seconds">${slowest.toFixed(2)} s</span></header><div class="strip">${strip}</div>${calls}</section>`;
   }).join("");
   feedRendered.clear();
   for (const record of feedRecords.values()) feedRendered.set(record.id, record.action);
