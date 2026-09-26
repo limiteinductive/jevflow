@@ -85,7 +85,7 @@ async def notes(draft: CommentedDraft) -> dict:
 
 @app.post("/answer")
 async def answer(question: Question) -> dict:
-    return {"answer": await decide.answer(question.sentence, question.question, question.goal)}
+    return asdict(await decide.answer(question.sentence, question.question, question.goal))
 
 
 @app.post("/revise")

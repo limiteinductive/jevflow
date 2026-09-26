@@ -62,6 +62,21 @@ class Fix:
     replacement: str
 
 
+@dataclass(frozen=True)
+class Measure:
+    label: str
+    """The question Jev answered, as a short phrase such as "readers get it"."""
+    probability: float
+
+
+@dataclass(frozen=True)
+class Answer:
+    text: str
+    """The coworker's words, written by the local model."""
+    measures: list[Measure]
+    """Jev's probabilities behind the reply, shown beside the words."""
+
+
 agent = Agent(MODEL)
 """One agent for every decision: a fresh agent per call opens a new connection and adds about 0.4 s."""
 
@@ -204,11 +219,11 @@ async def find_fixes(text: str, limit: int) -> list[Fix]:
     ]
 
 
-async def answer(sentence: str, question: str, goal: str) -> str:
+async def answer(sentence: str, question: str, goal: str) -> Answer:
     """The coworker's reply to the writer's `question` about `sentence`: the local model drafts `NUM_DRAFTS`, Jev ranks them on answering, being specific and keeping the voice.
 
     The top-ranked draft is shown unless every draft fails "answers the question"; then the drafts are resampled once.
-    Jev also names the kind of question; when it asks whether readers will understand, the reply leads with Jev's P(a reader gets it).
+    Jev also names the kind of question; when it asks whether readers will understand, P(a reader gets it) leads the measures.
     """
     reader = f"a typical reader of this {goal}" if goal else "a typical reader"
     Meta = create_model(
@@ -231,9 +246,10 @@ async def answer(sentence: str, question: str, goal: str) -> str:
         if max(answers for _, answers, _ in ranked) >= ANSWER_FLOOR:
             break
     meta = await meta_task
+    measures = [Measure("answers your question", ranked[0][1])]
     if meta["kind"] == "understand":
-        return f"{round(100 * meta['reader_gets'])}% of readers would get it. {ranked[0][2]}"
-    return ranked[0][2]
+        measures.insert(0, Measure("readers get it", meta["reader_gets"]))
+    return Answer(ranked[0][2], measures)
 
 
 async def revise(sentence: str, comment: str) -> str | None:

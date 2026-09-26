@@ -36,6 +36,7 @@
   .card p:last-child { margin-bottom: 0; }
   .card b { font-weight: 600; margin-right: 0.35rem; }
   .card .coworker b { color: rgb(var(--thread)); }
+  .card .measure { display: inline-block; margin: 0 4px 4px 0; padding: 0 6px; border-radius: 4px; font-size: 11px; background: rgba(var(--thread), 0.12); color: rgb(var(--thread)); }
   .card .status { color: var(--faint); font-size: 11.5px; }
   .ask {
     position: absolute; transform: translateY(-100%); font: 11.5px/1.25 -apple-system, "Helvetica Neue", sans-serif;
@@ -146,7 +147,8 @@ function renderThread(sheet) {
   const card = document.createElement("div");
   card.className = "card";
   const lines = [`<p><b>You</b>${escape(thread.question)}</p>`];
-  lines.push(`<p class="coworker"><b>Jev</b>${thread.answer === undefined ? '<span class="status">thinking…</span>' : escape(thread.answer)}</p>`);
+  const measures = (thread.measures || []).map((measure) => `<span class="measure">Jev · ${escape(measure.label)} ${Math.round(100 * measure.probability)}%</span>`).join("");
+  lines.push(`<p class="coworker"><b>jevflow</b>${thread.answer === undefined ? '<span class="status">thinking…</span>' : measures + escape(thread.answer)}</p>`);
   if (thread.reply) lines.push(`<p><b>You</b>${escape(thread.reply)}</p>`);
   if (thread.status) lines.push(`<p class="status">${escape(thread.status)}</p>`);
   card.innerHTML = lines.join("");
@@ -172,7 +174,8 @@ async function openThread(anchor, question) {
   const opened = thread;
   const result = await post("/answer", { sentence: anchor.text, question, goal: goal ? goal.text : "" });
   if (thread !== opened) return;
-  thread.answer = result.answer;
+  thread.answer = result.text;
+  thread.measures = result.measures;
   render();
 }
 
