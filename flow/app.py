@@ -131,7 +131,7 @@ async def notes(draft: CommentedDraft) -> dict:
 @app.post("/answer")
 async def answer(question: Question) -> dict:
     enabled = frozenset(components.COMPONENTS) - frozenset(question.disabled)
-    return asdict(await decide.answer(question.sentence, question.paragraph, question.question, question.goal, memory.context() + components.context(enabled)))
+    return asdict(await decide.answer(question.sentence, question.paragraph, question.question, question.goal, memory.context(), components.context(enabled)))
 
 
 @app.post("/revise")

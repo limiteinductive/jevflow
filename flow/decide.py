@@ -385,11 +385,12 @@ async def find_fixes(text: str, limit: int, goal: str, categories: list[str]) ->
     return fixes, suggestions
 
 
-async def answer(sentence: str, paragraph: str, question: str, goal: str, context: str) -> Answer:
+async def answer(sentence: str, paragraph: str, question: str, goal: str, memory: str, features: str) -> Answer:
     """The coworker's reply to the writer's `question` about `sentence`: the local model drafts `NUM_DRAFTS` in one batch, Jev ranks them on `DRAFT_CHECKS`.
 
     The top-ranked draft is shown unless every draft fails "answers the question"; then the drafts are resampled once.
     Jev also names the kind of question; when it asks whether readers will understand, P(a reader gets it) leads the measures.
+    When Jev says the question is about jevflow itself, the drafts are redone with `features`, the components' on/off state.
     """
     reader = f"a typical reader of this {goal}" if goal else "a typical reader"
     Meta = create_model(
@@ -398,9 +399,11 @@ async def answer(sentence: str, paragraph: str, question: str, goal: str, contex
         scope=(Scope, Field(description="Is the question about the last sentence, or about the whole paragraph (its length, pace or structure)?")),
         kind=(QuestionKind, Field(description="What is the writer asking? understand: will readers get it; opinion: what do you think; cut_or_keep: should it stay; true: is it accurate; wording: is there a better way to say it; other.")),
         reader_gets=(YesNo, Field(description=f"Would {reader} get what the sentence means?")),
+        about_assistant=(YesNo, Field(description="Is the writer asking the writing assistant about itself (what it can do, what it is doing, why it did something)?")),
     )
     meta_task = asyncio.create_task(run(Meta, f"Paragraph: {paragraph}\n\nLast sentence: {sentence}\n\nQuestion: {question}"))
-    for attempt in range(2):
+    context, retries = memory, 1
+    while True:
         drafts = list(dict.fromkeys(await generator.answers(sentence, paragraph, question, goal, NUM_DRAFTS, context)))
         fields = {
             f"{name}_{index}": (YesNo, Field(description=template.format(draft=draft)))
@@ -410,9 +413,13 @@ async def answer(sentence: str, paragraph: str, question: str, goal: str, contex
         Pick = create_model("Pick", __doc__=f"A writer drafting a {goal or 'text'} asks a coworker about the sentence they just wrote; the coworker drafted replies.", **fields)
         check = await run(Pick, f"Paragraph: {paragraph}\n\nLast sentence: {sentence}\n\nQuestion: {question}")
         ranked = sorted(((math.prod(check[f"{name}_{index}"] for name in DRAFT_CHECKS), check[f"answers_{index}"], draft) for index, draft in enumerate(drafts)), reverse=True)
-        if max(answers for _, answers, _ in ranked) >= ANSWER_FLOOR:
+        meta = await meta_task
+        if features and context == memory and meta["about_assistant"] >= NOTE_GATE:
+            context = memory + features
+        elif max(answers for _, answers, _ in ranked) >= ANSWER_FLOOR or not retries:
             break
-    meta = await meta_task
+        else:
+            retries -= 1
     feed.act(check, "shown", *(f"{name}_{drafts.index(ranked[0][2])}" for name in ("answers", "specific", "voice")))
     feed.act(meta, "shown" if meta["kind"] == "understand" else "silent", "kind", "reader_gets")
     measures = [Measure("answers", "Does the reply answer the writer's question?", ranked[0][1])]
@@ -463,7 +470,7 @@ async def about_component(span: str, question: str, component: str, text: str, s
     )
     intent, reply, probed, picked = await asyncio.gather(
         run(Intent, f"Typed: {span}"),
-        answer(sentence or paragraph, paragraph, f"{span} ({component})", goal, memory),
+        answer(sentence or paragraph, paragraph, f"{span} ({component})", goal, memory, ""),
         probe(question, text) if text else asyncio.sleep(0, None),
         pick_option(question, text) if text else asyncio.sleep(0, None),
     )
