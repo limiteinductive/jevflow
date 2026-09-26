@@ -303,6 +303,7 @@
   #page-list li:hover { color: var(--ink); }
   #page-list li.current { background: none; color: var(--ink); font-weight: 600; }
   #saved { border-radius: 0; background: var(--ok); }
+  #page-list li.retitled { animation: toggled 1.2s ease-out; }
   #components-panel { margin: auto 0 16px; }
   #components-panel h3 { display: flex; justify-content: space-between; margin: 0 0 4px; padding: 4px 8px; border-bottom: 1px solid var(--muted); color: var(--soft); font: 400 11px/1.6 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer; }
   #components-panel h3::after { content: "-"; }
@@ -1333,7 +1334,7 @@ editor.addEventListener("input", () => {
   clearTimeout(notesTimer);
   clearTimeout(insightsTimer);
   clearTimeout(fixesTimer);
-  notesTimer = setTimeout(findNotes, 600);
+  notesTimer = setTimeout(() => { findNotes(); retitle(); }, 600);
   insightsTimer = setTimeout(findInsights, 900);
   fixesTimer = setTimeout(findFixes, 900);
   render();
@@ -1433,6 +1434,23 @@ function saveCaret() {
   if (!pages[currentPage]) return;
   pages[currentPage].caret = [editor.selectionStart, editor.selectionEnd];
   try { localStorage.setItem(PAGES_KEY, JSON.stringify(pages)); } catch {}
+}
+
+const titleChecks = new Map();
+
+async function retitle() {
+  if (!isOn("titles")) return;
+  const pages = readPages();
+  const text = (id) => (id === currentPage ? editor.value.slice(0, typingStart()) : pages[id].state.text).trim();
+  const due = (id) => pages[id] && pages[id].titledBy !== "writer" && text(id) && titleChecks.get(id) !== text(id);
+  const id = due(currentPage) ? currentPage : Object.keys(pages).find((other) => due(other) && Object.entries(pages).some(([another, page]) => another !== other && page.title === pages[other].title));
+  if (!id) return;
+  titleChecks.set(id, text(id));
+  const others = Object.entries(pages).filter(([other]) => other !== id).map(([, page]) => page.title);
+  const result = await post("/title", { text: text(id), title: pages[id].title, others });
+  if (!result.title) return;
+  setPageTitle(id, result.title, "picked");
+  pageList.querySelector(`[data-page="${CSS.escape(id)}"]`)?.classList.add("retitled");
 }
 
 function renderPages(pages) {
