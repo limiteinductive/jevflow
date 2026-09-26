@@ -182,10 +182,10 @@ function renderThread(sheet) {
   card.innerHTML = lines.join("");
   const slot = card.querySelector(".measures");
   if (slot && thread.measures) {
-    if (!thread.rings) thread.rings = Object.assign(document.createElement("div"), { className: "rings" });
+    if (!thread.rings) { thread.rings = Object.assign(document.createElement("div"), { className: "rings" }); thread.ref = ++threadRefs; }
     for (const measure of thread.measures) {
       let ring = [...thread.rings.children].find((element) => element.dataset.name === measure.label);
-      if (!ring) { ring = createRing(measure.label); ring.classList.add("mini"); thread.rings.appendChild(ring); }
+      if (!ring) { ring = createRing(measure.label, `gauge:${thread.ref}-${measure.label}`); ring.classList.add("mini"); thread.rings.appendChild(ring); }
       setRing(ring, measure.probability, measure.question);
     }
     slot.replaceWith(thread.rings);
@@ -389,6 +389,7 @@ const GAUGE_FADE_MS = 500;
 const DELTA_MS = 2500;
 let gauges = [], gaugeLimit = null, gaugeBrief = "", gaugesRequest = 0, gaugeSeconds = null;
 const gaugeTimings = [];
+let threadRefs = 0;
 const graphemes = new Intl.Segmenter();
 
 function latestHeader(field) {
@@ -408,10 +409,11 @@ function levelWord(probability) {
   return GAUGE_LEVELS.find(([ceiling]) => probability < ceiling)[1];
 }
 
-function createRing(name) {
+function createRing(name, reference) {
   const element = document.createElement("div");
   element.className = "gauge entering";
   element.dataset.name = name;
+  element.dataset.ref = reference;
   element.innerHTML = `<svg viewBox="0 0 52 52"><circle class="track" cx="26" cy="26" r="21" fill="none" stroke-width="5"/><circle class="level" cx="26" cy="26" r="21" fill="none" stroke-width="5" stroke-linecap="round" stroke-dasharray="${GAUGE_RING}" stroke-dashoffset="${GAUGE_RING}"/></svg><span class="value">0%</span><span class="delta"></span><span class="name">${escape(name)}</span><span class="tip"></span>`;
   element.shown = 0;
   element.target = null;
@@ -448,7 +450,7 @@ function renderGauges() {
   for (const gauge of gauges) {
     let element = gaugesBox.querySelector(`.gauge[data-name="${CSS.escape(gauge.name)}"]:not(.leaving)`);
     if (!element) {
-      element = createRing(gauge.name);
+      element = createRing(gauge.name, `gauge:${gauge.name}`);
       gaugesBox.insertBefore(element, gaugesBox.querySelector(".count"));
     }
     setRing(element, gauge.probability, gauge.question);
