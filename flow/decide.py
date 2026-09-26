@@ -60,7 +60,7 @@ Scope = Literal["sentence", "paragraph"]
 
 QuestionKind = Literal["understand", "opinion", "cut_or_keep", "true", "wording", "other"]
 
-ComponentIntent = Literal["yes_no", "question", "instruction", "mention"]
+ComponentIntent = Literal["yes_no", "question", "instruction", "turn_off", "turn_on", "change", "mention"]
 
 HeaderField = Literal["goal", "audience", "tone", "to_do", "undo"]
 
@@ -454,7 +454,14 @@ async def about_component(span: str, question: str, component: str, text: str, s
     Intent = create_model(
         "Intent",
         __doc__=f"A writer pasted a reference to a part of their writing assistant's page into their draft. That part: {component}. They typed: '{span}'.",
-        intent=(ComponentIntent, Field(description="yes_no: they ask a yes or no question about that part; question: they ask an open question about it; instruction: they ask to change, drop, forget or mark it done; mention: it is part of the text they are writing.")),
+        intent=(
+            ComponentIntent,
+            Field(
+                description="yes_no: they ask a yes or no question about that part; question: they ask an open question about it; instruction: they ask to drop, forget or mark done an item; "
+                "turn_off: they ask to remove, hide or turn off the whole part; turn_on: they ask to bring it back or turn it on; change: they ask to change what it measures or how it works; "
+                "mention: it is part of the text they are writing."
+            ),
+        ),
     )
     intent, reply, probed, picked = await asyncio.gather(
         run(Intent, f"Typed: {span}"),

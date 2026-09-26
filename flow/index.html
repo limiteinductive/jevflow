@@ -296,8 +296,8 @@
 <body>
 <div class="page">
   <div id="headers"></div>
-  <div id="gauges"></div>
-  <div id="memory"></div>
+  <div id="gauges" data-ref="component:gauges" data-ref-data="the Impact box: rings scoring the draft on what matters for your Goal"></div>
+  <div id="memory" data-ref="component:memory" data-ref-data="the memory box: facts jevflow knows about you"></div>
   <div class="sheet">
     <div id="backdrop" class="layer" aria-hidden="true"></div>
     <textarea id="editor" class="layer" spellcheck="false" autofocus placeholder="Just write. Say what you're writing, who it's for and what to fix, all inline."></textarea>
@@ -1018,6 +1018,16 @@ async function handleRef(found) {
     render();
     return;
   }
+  const [kind, name] = ref.split(":");
+  if (kind === "component" && result.intent.startsWith("turn_")) { setComponent(name, result.intent === "turn_on"); return; }
+  if (kind === "component" && name === "gauges" && result.intent === "change") {
+    const changed = await post("/gauges/change", { goal: currentGoal(), audience: latestHeader("audience"), tone: latestHeader("tone"), comment: question });
+    if (!changed.categories) return;
+    lastRequests.delete("/gauges");
+    refreshGauges();
+    return;
+  }
+  if (kind === "component") return;
   const element = document.querySelector(`[data-ref="${CSS.escape(ref)}"]`);
   if (!element) return;
   element.dispatchEvent(new CustomEvent("ref-action", { bubbles: true, detail: { ref, instruction: span.text } }));
