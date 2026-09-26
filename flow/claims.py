@@ -15,7 +15,8 @@ from text_processing import Sentence
 if TYPE_CHECKING:
     from flow.decide import Note
 
-CLAIM_GATE = 0.5
+CLAIM_GATE = 0.8
+"""A sentence is a claim when P(checkable fact) reaches this: the demo's wrong claim scores 0.99, and the writer's own "i joined magic 6 months ago" up to 0.61."""
 FALSE_THRESHOLD = 0.3
 """A claim shows only when P(true) is below this: the demo's wrong claim scores 0.00, a true one 0.95 to 1.00, and an unverifiable one ('we shipped on friday') 0.59."""
 SWAP_THRESHOLD = 0.8
