@@ -123,7 +123,7 @@ async def notes(draft: CommentedDraft) -> dict:
     return {
         "notes": [asdict(note) for note in found],
         "timing": asdict(timing),
-        "reactions": [asdict(reaction) for reaction in reactions.find(sentences, draft.goal, found)] if "reactions" in enabled else [],
+        "reactions": [asdict(reaction) for reaction in await reactions.find(sentences, draft.goal, found)] if "reactions" in enabled else [],
         "mash": [asdict(mash) for mash in await reactions.find_mash(sentences, draft.goal)] if "reactions" in enabled else [],
         "toggles": [asdict(toggle) for toggle in components.find(sentences)],
         "memory": memory.state(),

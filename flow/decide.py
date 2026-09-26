@@ -223,7 +223,7 @@ async def decide_note(sentence: str, comment: str, goal: str, enabled: frozenset
         **reply,
         **new_piece,
         **components.fields(),
-        **(reactions.fields(goal) if "reactions" in enabled else {}),
+        **(reactions.fields() if "reactions" in enabled else {}),
         **(memory.fields(sentence) if "memory" in enabled else {}),
         **(claims.fields(goal) if "claims" in enabled else {}),
     )
@@ -231,7 +231,7 @@ async def decide_note(sentence: str, comment: str, goal: str, enabled: frozenset
         run(NoteGate, f"Sentence: {sentence}"), generator.extract_note(sentence), generator.extract_question(sentence), generator.extract_audience(sentence)
     )
     if "reactions" in enabled:
-        reactions.record(sentence, goal, gate)
+        reactions.record(sentence, gate)
     meta_sentences[sentence] = gate["for_assistant"]
     if "claims" in enabled:
         claims.record(sentence, goal, gate)
