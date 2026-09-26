@@ -1311,9 +1311,9 @@ window.addEventListener("resize", render);
 function renderMemory(memory) {
   const box = document.getElementById("memory");
   const facts = new Map(memory.facts.map((fact) => [fact.text, fact]));
-  const items = memory.recalled.filter((recall) => facts.has(recall.text)).map((recall) => {
+  const items = memory.recalled.filter((recall) => facts.has(recall.text)).map((recall, index) => {
     const fact = facts.get(recall.text);
-    return `<li title="${fact.day}"><span class="ring" style="--relevance: ${recall.probability.toFixed(2)}" title="relevant ${Math.round(100 * recall.probability)}%"></span>${escape(fact.words)}</li>`;
+    return `<li title="${fact.day}" data-ref="memory:${index}" data-ref-data="${attribute(fact.words)}"><span class="ring" style="--relevance: ${recall.probability.toFixed(2)}" title="relevant ${Math.round(100 * recall.probability)}%"></span>${escape(fact.words)}</li>`;
   });
   if (!items.length) {
     box.classList.remove("shown");
@@ -1323,6 +1323,11 @@ function renderMemory(memory) {
   box.innerHTML = `<ul>${items.join("")}</ul>`;
   setTimeout(() => box.classList.add("shown"), 20);
 }
+
+document.addEventListener("ref-action", (event) => {
+  if (!event.detail.ref.startsWith("memory:")) return;
+  post("/memory/forget", { sentence: event.detail.instruction.replace(new RegExp(REF_TOKEN.source), `"${event.target.dataset.refData}"`) });
+});
 
 async function findMemory() {
   if (!isOn("memory")) return;
