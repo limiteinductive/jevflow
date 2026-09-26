@@ -213,7 +213,7 @@ async def pause(draft: Draft) -> dict:
     Writes run after the response; the reply lists the sentences Jev read as forget requests, for the page to lift out of the text.
     """
     global recalled
-    fresh = list(dict.fromkeys(sentence.text for sentence in decide.line_sentences(draft.text) if sentence.text not in seen))
+    fresh = list(dict.fromkeys(sentence.text for sentence in decide.line_sentences(draft.text, []) if sentence.text not in seen))
     found = candidates(draft.text)
     fields = {}
     for index, sentence in enumerate(fresh):
