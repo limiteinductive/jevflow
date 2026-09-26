@@ -861,7 +861,7 @@ async function findNotes() {
     setComponent(toggle.component, toggle.on);
   }
   for (const reaction of result.reactions) {
-    if (reactions.length < MAX_REACTIONS && reaction.end <= limit && !reactions.some((other) => other.text === reaction.text)) reactions.push(reaction);
+    if (reactions.length < MAX_REACTIONS && reaction.end <= limit && !reactions.some((other) => other.start < reaction.end && reaction.start < other.end)) reactions.push(reaction);
   }
   applyPendingFixes();
   liftNotes();
