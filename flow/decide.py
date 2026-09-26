@@ -23,7 +23,7 @@ ANSWER_FLOOR = 0.3
 """Below this on "answers the writer's question?" for every draft, the drafts are resampled once."""
 FIX_THRESHOLD = 0.7
 """Every fix question must reach this; a real spelling fix scores at least 0.90 on all four and an unchanged sentence 0.00 on `real_mistake`."""
-NOTE_CONTEXT = "A writer types their text and, in the same stream, notes to a writing assistant such as 'make this punchier', 'this is for engineers', 'im writing a blog post' or 'undo'."
+NOTE_CONTEXT = "A writer types their text and, in the same stream, notes to a writing assistant such as 'make this punchier', 'this is for engineers', 'im writing a blog post', 'replying to my boss about friday' or 'undo'."
 
 YesNo = Literal["yes", "no"]
 
@@ -140,9 +140,9 @@ async def decide_note(sentence: str, comment: str) -> SentenceNote | None:
     NoteCheck = create_model(
         "NoteCheck",
         __doc__=NOTE_CONTEXT + f" The sentence is: '{sentence}'.",
-        only_note=(YesNo, Field(description=f"Is '{note}' only the note to the assistant, with none of the writer's text in it?")),
+        only_note=(YesNo, Field(description=f"Is '{note}' only about the draft (what it is, who it is for, how it should sound or what to change), with none of the text the writer is writing?")),
         whole_note=(YesNo, Field(description=f"Does '{note}' hold the whole note, leaving no note words out?")),
-        sentence_only_note=(YesNo, Field(description="Is the whole sentence only a note to the assistant, with none of the writer's text in it?")),
+        sentence_only_note=(YesNo, Field(description="Is the whole sentence only about the draft (what it is, who it is for, how it should sound or what to change), with none of the text the writer is writing?")),
     )
     HeaderCheck = create_model(
         "HeaderCheck",
