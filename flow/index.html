@@ -776,11 +776,12 @@ async function findNotes() {
   if (request !== notesRequest || editor.value !== text) return;
   notes = result.notes;
   timing = result.timing;
-  claims = result.claims.filter((claim) => claim.end <= typingStart());
   const limit = typingStart();
   pendingToggles = result.toggles;
   metaSpans = result.meta;
   mashSpans = result.mash.map((span) => ({ ...span, end: span.start + text.slice(span.start, span.end).trimEnd().length, text: text.slice(span.start, span.end).trimEnd() }));
+  const content = contentText();
+  claims = result.claims.filter((claim) => claim.end <= limit && content.slice(claim.start, claim.end) === claim.text);
   const mash = mashSpans.find((span) => span.end <= limit && !declined.has(`mash ${span.comment}`));
   if (mash && !thread) {
     declined.add(`mash ${mash.comment}`);
