@@ -345,6 +345,7 @@ const FIELDS = { goal: "Goal", audience: "Audience", tone: "Tone", to_do: "To do
 const MAX_OPEN_QUESTIONS = 3;
 const MAX_REACTIONS = 3;
 const FLASH_MS = 1200;
+const MARGIN_GAP = 6;
 const editor = document.getElementById("editor");
 const backdrop = document.getElementById("backdrop");
 const asksLayer = document.getElementById("asks");
@@ -440,12 +441,25 @@ function render() {
   renderReactions(sheet);
   renderProbes(sheet);
   renderClaims(sheet);
+  stackMargin();
   headersBox.innerHTML = Object.entries(FIELDS).map(([field, name]) => {
     const entries = headers.filter((header) => header.field === field).map((header) => escape(header.text));
     return entries.length ? `<div><b>${name}:</b>${entries.join("; ")}</div>` : "";
   }).join("");
   clearTimeout(saveTimer);
   saveTimer = setTimeout(savePage, SAVE_MS);
+}
+
+function stackMargin() {
+  const placed = [];
+  const items = [...document.querySelectorAll("#comments:not(.below) > .card, #probes > .probe, #claims > .claim, #reactions > .reaction")]
+    .map((element) => ({ element, rect: element.getBoundingClientRect() }))
+    .sort((first, second) => first.rect.top - second.rect.top);
+  for (const { element, rect } of items) {
+    const floor = Math.max(rect.top, ...placed.filter((other) => other.left < rect.right && rect.left < other.right).map((other) => other.bottom + MARGIN_GAP));
+    element.style.top = `${parseFloat(element.style.top) + floor - rect.top}px`;
+    placed.push({ left: rect.left, right: rect.right, bottom: rect.bottom + floor - rect.top });
+  }
 }
 
 function renderThread(sheet) {
