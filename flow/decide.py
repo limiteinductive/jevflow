@@ -10,7 +10,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, create_model
 from pydantic_ai import Agent
 
-from flow import generator
+from flow import blocks, generator
 from text_processing import Sentence, split_sentences
 
 MODEL = "typesafe:jev-latest"
@@ -27,12 +27,10 @@ NOTE_CONTEXT = "A writer types their text and, in the same stream, notes to a wr
 
 YesNo = Literal["yes", "no"]
 
-NoteField = Literal["goal", "audience", "tone", "to_do", "undo", "question", "reply"]
-"""Header fields, plus "undo" (reverts the last edit), "question" (opens a comment thread on the previous sentence) and "reply" (answers the open comment)."""
+NoteField = Literal["goal", "audience", "tone", "to_do", "ideas", "undo", "question", "reply"] | str
+"""Blocks (a block created while writing goes by its name), plus "undo" (reverts the last edit), "question" (opens a comment thread on the previous sentence) and "reply" (answers the open comment)."""
 
 QuestionKind = Literal["understand", "opinion", "cut_or_keep", "true", "wording", "other"]
-
-HeaderField = Literal["goal", "audience", "tone", "to_do", "undo"]
 
 
 @dataclass(frozen=True)
@@ -93,10 +91,11 @@ async def run(output_type: type[BaseModel], prompt: str) -> dict[str, float | st
     return {name: probabilities[name]["yes"] if "yes" in probabilities[name] else getattr(result.output, name) for name in probabilities}
 
 
-async def decide_note(sentence: str, comment: str) -> SentenceNote | None:
+async def decide_note(sentence: str, comment: str, names: list[str]) -> SentenceNote | None:
     """Jev gates the sentence while the LLM copies out the note words and writes the header (the local model is free, so it runs on every sentence); Jev then checks both.
 
     When the copied words fail the check, the sentence is a note only if Jev reads all of it as one; a header that fails is replaced by the note words.
+    `names` are the blocks created while writing; a note that fits no block goes to a new block the local model names, when Jev accepts it.
     """
     reply = {"reply": (YesNo, Field(description=f"Is the sentence the writer's reply to the coworker's comment '{comment}'?"))} if comment else {}
     NoteGate = create_model(
@@ -105,18 +104,19 @@ async def decide_note(sentence: str, comment: str) -> SentenceNote | None:
         plan=(YesNo, Field(description="Is the sentence the writer's plan or intent for the text, rather than part of the text itself?")),
         asks=(YesNo, Field(description="Is the writer asking the assistant for its opinion or help?")),
         is_question=(YesNo, Field(description="Is the sentence a question?")),
-        field=(HeaderField, Field(description="What is the note about? goal: what the writer is writing; audience: who it is for; tone: how it should sound; to_do: something to add, check or change; undo: asks to undo the last edit.")),
+        kept=(YesNo, Field(description=blocks.KEPT_QUESTION)),
+        block=blocks.choice(names),
         **reply,
     )
-    gate, (note, header), question = await asyncio.gather(
-        run(NoteGate, f"Sentence: {sentence}"), generator.extract_note(sentence), generator.extract_question(sentence)
+    gate, (note, header), question, name = await asyncio.gather(
+        run(NoteGate, f"Sentence: {sentence}"), generator.extract_note(sentence), generator.extract_question(sentence), blocks.propose_name(sentence)
     )
     if gate.get("reply", 0) >= NOTE_GATE:
         return SentenceNote(sentence, gate["reply"], "reply", "")
     asks = min(gate["asks"], gate["is_question"])
-    field = "question" if asks >= NOTE_GATE else gate["field"]
-    probability = max(gate["plan"], asks)
-    if probability < NOTE_GATE:
+    field = "question" if asks >= NOTE_GATE else gate["block"]
+    probability = max(gate["plan"], asks, gate["kept"] if gate["kept"] >= blocks.KEPT_GATE else 0)
+    if probability < NOTE_GATE or field == "content":
         return None
     if field == "undo":
         return SentenceNote(sentence, probability, "undo", "") if len(sentence.split()) <= MAX_NOTE_WORDS else None
@@ -135,7 +135,13 @@ async def decide_note(sentence: str, comment: str) -> SentenceNote | None:
         fair=(YesNo, Field(description="Is the header a fair short version of the note?")),
         adds=(YesNo, Field(description="Does the header add something the note does not say?")),
     )
-    check, header_check = await asyncio.gather(run(NoteCheck, f"Sentence: {sentence}"), run(HeaderCheck, f"Note: {note}\n\nHeader: {header}"))
+    check, header_check, field = await asyncio.gather(
+        run(NoteCheck, f"Sentence: {sentence}"), run(HeaderCheck, f"Note: {note}\n\nHeader: {header}"), blocks.resolve(field, sentence, name, names)
+    )
+    if field == blocks.OTHER:
+        return None
+    if field not in blocks.BLOCKS:
+        return SentenceNote(sentence, probability, field, header or sentence)
     if note not in sentence or min(check["only_note"], check["whole_note"]) < NOTE_THRESHOLD:
         if check["sentence_only_note"] < NOTE_THRESHOLD:
             return None
@@ -156,11 +162,11 @@ async def question_span(sentence: str, question: str) -> str:
     return question if check["whole_question"] >= NOTE_THRESHOLD else sentence
 
 
-async def find_notes(text: str, comment: str) -> list[Note]:
-    """At most one note per sentence, located by character offsets in `text`; `comment` is the coworker's open comment, or empty."""
+async def find_notes(text: str, comment: str, names: list[str]) -> list[Note]:
+    """At most one note per sentence, located by character offsets in `text`; `comment` is the coworker's open comment, or empty, and `names` the blocks created while writing."""
     sentences = line_sentences(text)
     fresh = list(dict.fromkeys(sentence.text.rstrip(".") for sentence in sentences if (sentence.text.rstrip("."), comment) not in sentence_notes))
-    for sentence, decision in zip(fresh, await asyncio.gather(*(decide_note(sentence, comment) for sentence in fresh))):
+    for sentence, decision in zip(fresh, await asyncio.gather(*(decide_note(sentence, comment, names) for sentence in fresh))):
         sentence_notes[sentence, comment] = decision
     notes = []
     for sentence in sentences:

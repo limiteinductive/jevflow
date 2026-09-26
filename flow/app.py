@@ -12,7 +12,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from flow import decide
+from flow import blocks, decide
 from mirror.model import Stacker
 from mirror.scan import scan
 
@@ -20,6 +20,7 @@ PORT = 8000
 INSIGHT_THRESHOLD = 0.5
 
 app = FastAPI()
+app.include_router(blocks.router)
 stacker = Stacker.load()
 
 
@@ -31,6 +32,8 @@ class CommentedDraft(BaseModel):
     text: str
     comment: str
     """The coworker's open comment, or empty; a sentence can be a reply to it."""
+    blocks: list[str] = []
+    """Names of the blocks created while writing."""
 
 
 class Question(BaseModel):
@@ -80,7 +83,7 @@ async def log_decisions(request: Request, call_next):
 
 @app.post("/notes")
 async def notes(draft: CommentedDraft) -> dict:
-    return {"notes": [asdict(note) for note in await decide.find_notes(draft.text, draft.comment)]}
+    return {"notes": [asdict(note) for note in await decide.find_notes(draft.text, draft.comment, draft.blocks)]}
 
 
 @app.post("/answer")
