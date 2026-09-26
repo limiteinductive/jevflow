@@ -13,7 +13,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from flow import claims, components, decide, feed, gauges, memory, reactions, titles
+from flow import claims, components, decide, feed, gauges, ideas, memory, reactions, titles
 from flow.components import ComponentName
 from mirror.model import Stacker
 from mirror.scan import scan
@@ -131,6 +131,19 @@ async def notes(draft: CommentedDraft) -> dict:
         "meta": [{"start": sentence.start, "end": sentence.start + len(sentence.text), "text": sentence.text} for sentence in decide.meta_spans(sentences)],
         "claims": [asdict(claim) for claim in claims.find(sentences, draft.goal, found)] if "claims" in enabled else [],
     }
+
+
+class IdeaRequest(BaseModel):
+    text: str
+    """The draft's content text, without notes, meta sentences or references."""
+    goal: str
+    shown: list[str]
+    """Angles already shown, which a new round leaves out."""
+
+
+@app.post("/ideas")
+async def find_ideas(request: IdeaRequest) -> dict:
+    return {"ideas": [asdict(idea) for idea in await ideas.find(request.text, request.goal, memory.context(), request.shown)]}
 
 
 @app.post("/answer")

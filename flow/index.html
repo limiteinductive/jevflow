@@ -227,6 +227,10 @@
   .layer { font: 21px/1.9 var(--sans); }
   #headers { font: 14px/1.4 var(--sans); color: var(--soft); margin-bottom: 0; }
   #headers b { font: 400 12px var(--mono); color: var(--ink); margin-right: 12px; }
+  .idea { display: inline-flex; align-items: center; gap: 5px; margin-right: 16px; cursor: pointer; }
+  .idea svg { width: 12px; height: 12px; flex: none; }
+  .idea .track { stroke: var(--surface-2); }
+  .idea .level { stroke: var(--fill); }
   #headers:not(:empty) + #gauges:not(:empty) { margin-top: 8px; }
   #memory { font-family: var(--sans); color: var(--soft); }
   #memory .ring { box-shadow: none; }
@@ -461,7 +465,7 @@ function render() {
   headersBox.innerHTML = Object.entries(FIELDS).map(([field, name]) => {
     const entries = headers.filter((header) => header.field === field).map((header, index) => `<span data-ref="${field}:${index + 1}">${escape(header.text)}</span>`);
     return entries.length ? `<div data-ref="header:${field}"><b>${name}:</b>${entries.join("; ")}</div>` : "";
-  }).join("");
+  }).join("") + (ideas.length ? `<div><b>Ideas:</b>${ideas.map((idea, index) => `<span class="idea" data-ref="ideas:${index + 1}" data-ref-data="${attribute(`an angle the assistant suggests writing about, ${idea.measures.map((measure) => `${measure.label} ${Math.round(100 * measure.probability)}%`).join(", ")}`)}" title="${attribute(idea.measures.map((measure) => `${measure.question} ${Math.round(100 * measure.probability)}%`).join("\n"))}"><svg viewBox="0 0 12 12"><circle class="track" cx="6" cy="6" r="4.5" fill="none" stroke-width="2"/><circle class="level" cx="6" cy="6" r="4.5" fill="none" stroke-width="2" stroke-dasharray="${IDEA_RING}" stroke-dashoffset="${IDEA_RING * (1 - idea.probability)}" transform="rotate(-90 6 6)"/></svg>${escape(idea.text)}</span>`).join("")}</div>` : "");
   clearTimeout(saveTimer);
   saveTimer = setTimeout(savePage, SAVE_MS);
 }
@@ -805,6 +809,13 @@ function liftNotes() {
       else if (note.field === "question" && anchor.text) openThread(anchor, note.text);
       continue;
     }
+    if (note.field === "ideas") {
+      if (!isOn("ideas")) continue;
+      const [start, end] = removalRange(editor.value, note);
+      applyEdit(start, end, "", `note ${note.text}`);
+      requestIdeas();
+      continue;
+    }
     if (note.field === "find" || note.field === "open") {
       declined.add(`note ${note.text}`);
       searchPages(note);
@@ -844,7 +855,7 @@ async function findNotes() {
   timing = result.timing;
   if (isOn("memory")) renderMemory(result.memory);
   const limit = typingStart();
-  pendingToggles = result.toggles;
+  pendingToggles = result.toggles.filter((toggle) => !refSpans(toggle.text, REF_TOKEN).length);
   metaSpans = result.meta;
   mashSpans = result.mash.map((span) => ({ ...span, end: span.start + text.slice(span.start, span.end).trimEnd().length, text: text.slice(span.start, span.end).trimEnd() }));
   const content = contentText();
@@ -854,7 +865,7 @@ async function findNotes() {
     declined.add(`mash ${mash.comment}`);
     thread = { anchor: { start: mash.start, end: mash.end, text: mash.text }, question: "", answer: mash.comment, measures: [{ label: "keyboard mash", question: mash.question, probability: mash.probability }] };
   }
-  for (const toggle of result.toggles) {
+  for (const toggle of pendingToggles) {
     if (toggle.end > limit || editor.value.slice(toggle.start, toggle.end) !== toggle.text) continue;
     const [from, to] = removalRange(editor.value, toggle);
     replaceAll(editor.value.slice(0, from) + editor.value.slice(to), from);
@@ -1145,6 +1156,7 @@ const REF_SPAN = /[^.!?\n@]*(?<![\w.])@(?:"[^"\n]*"|[\w-]+)[^.!?\n]*[.!?]?/g;
 const pendingRefs = [];
 let probes = [], previousValue = "";
 let claims = [];
+let ideas = [], seenIdeas = [];
 const handledRefs = new Set();
 const snapshots = new Map();
 const slug = (text) => text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 24);
@@ -1221,13 +1233,35 @@ async function handleRef(found) {
     refreshGauges();
     return;
   }
+  if (kind === "component" && name === "ideas" && result.intent === "more") { requestIdeas(); return; }
   if (kind === "component") return;
   const element = document.querySelector(`[data-ref="${CSS.escape(ref)}"]`);
   if (!element) return;
-  element.dispatchEvent(new CustomEvent("ref-action", { bubbles: true, detail: { ref, instruction: span.text } }));
+  element.dispatchEvent(new CustomEvent("ref-action", { bubbles: true, detail: { ref, instruction: span.text, intent: result.intent } }));
   element.classList.add("ref-gone");
   setTimeout(() => { element.hidden = true; }, 600);
 }
+
+const IDEA_RING = 2 * Math.PI * 4.5;
+
+async function requestIdeas() {
+  const page = currentPage;
+  const result = await post("/ideas", { text: contentText().replace(/\s+/g, " ").trim(), goal: currentGoal(), shown: seenIdeas });
+  if (page !== currentPage) return;
+  ideas = result.ideas;
+  seenIdeas.push(...ideas.map((idea) => idea.text));
+  render();
+}
+
+headersBox.addEventListener("ref-action", (event) => {
+  const [kind, id] = event.detail.ref.split(":");
+  if (kind !== "ideas") return;
+  const idea = ideas[Number(id) - 1];
+  if (!idea) return;
+  ideas = ideas.filter((other) => other !== idea);
+  if (event.detail.intent === "accept") headers.push({ field: "to_do", text: idea.text });
+  render();
+});
 
 function renderClaims(sheet) {
   const box = document.getElementById("claims");
@@ -1386,6 +1420,7 @@ const pageParts = {
   flags: { save: () => insights, restore: (saved = []) => { insights = saved.filter(stillThere); } },
   probes: { save: () => probes, restore: (saved = []) => { probes = saved.filter(stillThere); } },
   claims: { save: () => claims, restore: (saved = []) => { claims = saved.filter(stillThere); } },
+  ideas: { save: () => ({ ideas, seen: seenIdeas }), restore: (saved) => { ideas = saved?.ideas || []; seenIdeas = saved?.seen || []; } },
   gauges: {
     save: () => ({ gauges, limit: gaugeLimit, brief: gaugeBrief }),
     restore: (saved) => { gauges = saved?.gauges || []; gaugeLimit = saved?.limit ?? null; gaugeBrief = saved?.brief || ""; renderGauges(); },

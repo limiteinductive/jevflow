@@ -12,7 +12,7 @@ from typing import Literal
 
 from pydantic import Field, create_model
 
-from flow import claims, components, feed, generator, memory, reactions
+from flow import claims, components, feed, generator, ideas, memory, reactions
 from flow.jev import YesNo, run
 from text_processing import Sentence, split_sentences
 
@@ -64,14 +64,14 @@ OPTION_FIT = 0.5
 """The options are shown only when Jev's P(one of them answers the question) reaches this; otherwise the question gets a one-line reply."""
 NOTE_CONTEXT = "A writer types their text and, in the same stream, notes to a writing assistant such as 'make this punchier', 'this is for engineers', 'im writing a blog post', 'replying to my boss about friday' or 'undo'."
 
-NoteField = Literal["new_page", "goal", "audience", "tone", "to_do", "undo", "question", "reply", "find", "open", "forget"]
-"""Header fields, plus "undo" (reverts the last edit), "question" (opens a comment thread on the previous sentence), "reply" (answers the open comment), "find" and "open" (search the writer's other pages, and switch to the page found), and "forget" (asks memory to forget a fact)."""
+NoteField = Literal["new_page", "goal", "audience", "tone", "to_do", "undo", "question", "reply", "find", "open", "forget", "ideas"]
+"""Header fields, plus "undo" (reverts the last edit), "question" (opens a comment thread on the previous sentence), "reply" (answers the open comment), "find" and "open" (search the writer's other pages, and switch to the page found), "forget" (asks memory to forget a fact), and "ideas" (asks for angles to write about)."""
 
 Scope = Literal["sentence", "paragraph"]
 
 QuestionKind = Literal["understand", "opinion", "cut_or_keep", "true", "wording", "other"]
 
-ComponentIntent = Literal["yes_no", "question", "reply", "set_target", "instruction", "turn_off", "turn_on", "change", "mention"]
+ComponentIntent = Literal["yes_no", "question", "reply", "set_target", "instruction", "accept", "more", "turn_off", "turn_on", "change", "mention"]
 
 HeaderField = Literal["goal", "audience", "tone", "to_do", "undo"]
 
@@ -226,6 +226,7 @@ async def decide_note(sentence: str, comment: str, goal: str, enabled: frozenset
         **(reactions.fields() if "reactions" in enabled else {}),
         **(memory.fields(sentence) if "memory" in enabled else {}),
         **(claims.fields(goal) if "claims" in enabled else {}),
+        **(ideas.fields() if "ideas" in enabled else {}),
     )
     gate, (note, header), question, audience = await asyncio.gather(
         run(NoteGate, f"Sentence: {sentence}"), generator.extract_note(sentence), generator.extract_question(sentence), generator.extract_audience(sentence)
@@ -243,6 +244,9 @@ async def decide_note(sentence: str, comment: str, goal: str, enabled: frozenset
     if gate.get("reply", 0) >= NOTE_GATE:
         feed.act(gate, "applied", "reply", component="replies")
         return SentenceNote(sentence, gate["reply"], "reply", [])
+    if gate.get("wants_ideas", 0) >= NOTE_GATE:
+        feed.act(gate, "applied", "wants_ideas", component="ideas")
+        return SentenceNote(sentence, gate["wants_ideas"], "ideas", [])
     new_page = gate.get("new_piece", 0)
     searches = max(gate["find_page"], gate["open_page"])
     if searches >= NOTE_GATE and new_page < NOTE_GATE:
@@ -547,7 +551,7 @@ async def about_component(span: str, question: str, component: str, text: str, s
             ComponentIntent,
             Field(
                 description="yes_no: they ask a yes or no question about that part; question: they ask an open question about it; reply: they answer or reply to a comment in it; "
-                "set_target: they set a goal or target number for it; instruction: they ask to drop, forget or mark done an item; "
+                "set_target: they set a goal or target number for it; instruction: they ask to drop, forget or mark done an item; accept: they say yes to an item, pick it or take it; more: they ask for more or other items; "
                 "turn_off: they ask to remove, hide or turn off the whole part; turn_on: they ask to bring it back or turn it on; change: they ask to change what it measures or how it works; "
                 "mention: it is part of the text they are writing."
             ),
