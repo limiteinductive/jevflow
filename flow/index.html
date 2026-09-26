@@ -1447,7 +1447,7 @@ function componentMark(name) {
 
 function outlineComponent(name) {
   for (const frame of outlinedFrames) frame.classList.remove("outlined");
-  const frames = name ? [...document.querySelectorAll(`[data-ref="component:${CSS.escape(name)}"]`)].filter((frame) => !componentList.contains(frame)) : [];
+  const frames = name ? [...document.querySelectorAll(`[data-ref="component:${CSS.escape(name)}"]`)].filter((frame) => !componentList.contains(frame) && frame.childElementCount) : [];
   outlinedFrames = frames.flatMap((frame) => frame.offsetHeight ? [frame] : [...frame.children]);
   for (const frame of outlinedFrames) frame.classList.add("outlined");
 }
