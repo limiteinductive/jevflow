@@ -900,8 +900,9 @@ async function findFixes() {
   const limit = typingStart();
   if (!text.slice(0, limit).trim()) return;
   const request = ++fixesRequest;
-  const result = await post("/fixes", { text: contentText(), limit, goal: currentGoal() });
+  const result = await post("/fixes", { text: contentText(), limit, goal: currentGoal() }).catch(() => null);
   if (request !== fixesRequest || editor.value !== text) return;
+  if (!result) { fixesTimer = setTimeout(findFixes, RETRY_MS); return; }
   const anchored = (fix) => thread && stillThere(thread.anchor) && fix.start < thread.anchor.end && thread.anchor.start < fix.end;
   const clear = result.fixes.filter((fix) => !declined.has(`fix ${fix.text} ${fix.replacement}`) && !anchored(fix) && !notes.some((note) => note.start < fix.end && fix.start < note.end));
   pendingFixes = clear;
@@ -909,8 +910,8 @@ async function findFixes() {
   applyPendingFixes();
 }
 
+// A fix touches only a finished sentence behind the caret, and only when the text is unchanged since the request, so it skips the timing gate that comments and popups wait for.
 function applyPendingFixes() {
-  if (!settled()) return;
   const ready = pendingFixes.filter((fix) => editor.value.slice(fix.start, fix.end) === fix.text);
   pendingFixes = [];
   for (const fix of ready.sort((first, second) => second.start - first.start)) {
@@ -919,8 +920,10 @@ function applyPendingFixes() {
     flashes.push(flash);
     setTimeout(() => { flashes = flashes.filter((other) => other !== flash); render(); }, FLASH_MS);
   }
-  if (!ready.length && !thread) suggest(pendingSuggestions);
-  pendingSuggestions = [];
+  if (settled()) {
+    if (!ready.length && !thread) suggest(pendingSuggestions);
+    pendingSuggestions = [];
+  }
   render();
 }
 
