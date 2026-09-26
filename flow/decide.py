@@ -141,7 +141,7 @@ class Timing:
 class GoalSuggestion:
     replacement: str
     comment: str
-    """Why the sentence should change, such as "For a LinkedIn post, this sentence works against 'concrete'."."""
+    """Why the sentence should change, such as "heads up: for a LinkedIn post, this one works against 'concrete'."."""
     measures: list[Measure]
 
 
@@ -373,7 +373,7 @@ async def decide_fix(sentence: str, draft: str, goal: str, categories: list[str]
         feed.act(check, "dropped" if corrects else "silent", *check)
         return None, None
     against = " and ".join(f"'{category}'" for _, category in hurt)
-    comment = f"For {goal}, this sentence works against {against}."
+    comment = f"heads up: for {goal}, this one works against {against}."
     rewrite = await revise(sentence, comment, "ok", "", "")
     if rewrite is None or rewrite == sentence:
         feed.act(check, "dropped", *hurts)
