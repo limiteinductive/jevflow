@@ -53,8 +53,8 @@ NOTE_CONTEXT = "A writer types their text and, in the same stream, notes to a wr
 
 YesNo = Literal["yes", "no"]
 
-NoteField = Literal["new_page", "goal", "audience", "tone", "to_do", "undo", "question", "reply"]
-"""Header fields, plus "undo" (reverts the last edit), "question" (opens a comment thread on the previous sentence) and "reply" (answers the open comment)."""
+NoteField = Literal["new_page", "goal", "audience", "tone", "to_do", "undo", "question", "reply", "find", "open"]
+"""Header fields, plus "undo" (reverts the last edit), "question" (opens a comment thread on the previous sentence), "reply" (answers the open comment), and "find" and "open" (search the writer's other pages, and switch to the page found)."""
 
 Scope = Literal["sentence", "paragraph"]
 
@@ -193,12 +193,14 @@ async def decide_note(sentence: str, comment: str, goal: str, enabled: frozenset
     new_piece = {"new_piece": (YesNo, Field(description=f"Does the writer say they are now writing something other than the {goal}?"))} if goal and "pages" in enabled else {}
     NoteGate = create_model(
         "NoteGate",
-        __doc__=NOTE_CONTEXT + (f" The writer's coworker just commented on the draft: '{comment}'" if comment else ""),
+        __doc__=NOTE_CONTEXT + " The writer keeps several pages, one per piece of writing." + (f" The writer's coworker just commented on the draft: '{comment}'" if comment else ""),
         plan=(YesNo, Field(description="Is the sentence the writer's plan or intent for the text, rather than part of the text itself?")),
         asks=(YesNo, Field(description="Is the writer asking the assistant for its opinion or help?")),
         is_question=(YesNo, Field(description="Is the sentence a question?")),
         field=(HeaderField, Field(description="What is the note about? goal: what the writer is writing; audience: who it is for; tone: how it should sound; to_do: something to add, check or change; undo: asks to undo the last edit.")),
         for_whom=(YesNo, Field(description="Does the sentence also say who the text is for?")),
+        find_page=(YesNo, Field(description="Does the writer ask about something they wrote before, rather than about this text?")),
+        open_page=(YesNo, Field(description="Is the sentence a command to switch to another page, like 'open the tacos one' or 'take me to my essay'?")),
         **reply,
         **new_piece,
         **components.fields(),
@@ -214,6 +216,10 @@ async def decide_note(sentence: str, comment: str, goal: str, enabled: frozenset
     if gate.get("reply", 0) >= NOTE_GATE:
         feed.act(gate, "applied", "reply")
         return SentenceNote(sentence, gate["reply"], "reply", [])
+    searches = max(gate["find_page"], gate["open_page"])
+    if searches >= NOTE_GATE:
+        feed.act(gate, "applied", "find_page", "open_page")
+        return SentenceNote(sentence, searches, "open" if gate["open_page"] >= gate["find_page"] else "find", [])
     asks = min(gate["asks"], gate["is_question"])
     new_page = gate.get("new_piece", 0)
     field = "question" if asks >= NOTE_GATE else "new_page" if new_page >= NOTE_GATE else gate["field"]
