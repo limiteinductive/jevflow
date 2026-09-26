@@ -14,7 +14,7 @@ Needs an Apple Silicon Mac (the text model runs locally on MLX) and your own Typ
 
 1. Install: `uv sync`
 2. Set your key in the shell, never in a file in the repo: `export TYPESAFE_API_KEY=<your key>`
-3. Start the local model on port 8085: `uv run autocomplete/mlx_server.py --model Qwen/Qwen3-4B-MLX-8bit --port 8085`. The same server with `--model Qwen/Qwen3-1.7B-MLX-8bit --port 8083` returns `n` continuations from one batched call.
+3. Start the local model on port 8085: `uv run autocomplete/mlx_server.py --model Qwen/Qwen3-4B-MLX-4bit --port 8085`. The same server with `--model Qwen/Qwen3-1.7B-MLX-8bit --port 8083` returns `n` continuations from one batched call.
 4. Start the app: `uv run python -m flow.app`
 5. Open http://127.0.0.1:8000 and type.
 
