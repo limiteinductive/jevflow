@@ -125,7 +125,7 @@ async def choose_categories(brief: Brief, opening: str) -> Pick:
     check = await jev.run(Matters, f"{brief.prompt()}\n\nStart of the draft: {opening}")
     ranked = sorted(((check[f"category_{index}"], name) for index, name in enumerate(candidates)), reverse=True)[:NUM_GAUGES]
     confirmed = limit if limit and check["limit"] >= LIMIT_THRESHOLD else None
-    feed.act(check, "applied", *(f"category_{candidates.index(name)}" for _, name in ranked), *(["limit"] if confirmed else []))
+    feed.act(check, "applied", *(f"category_{candidates.index(name)}" for _, name in ranked), *(["limit"] if confirmed else []), component="gauges")
     return Pick([Category(name, f"Is this {brief.goal} {name}?") for _, name in ranked], confirmed)
 
 
@@ -138,7 +138,7 @@ async def score(text: str, brief: Brief, categories: list[Category]) -> Scores:
     )
     began = time.perf_counter()
     check = await jev.run(Impact, f"Draft: {text}")
-    feed.act(check, "shown", *check)
+    feed.act(check, "shown", *check, component="gauges")
     return Scores([check[f"category_{index}"] for index in range(len(categories))], time.perf_counter() - began)
 
 
@@ -191,7 +191,7 @@ async def change(request: CategoryChange) -> dict:
     )
     check = await jev.run(ChangeCheck, f"Comment: {request.comment}\n\nOld: {'; '.join(names)}\n\nNew: {'; '.join(proposed)}")
     applied = min(check["follows"], check["keeps"]) >= CHANGE_THRESHOLD
-    feed.act(check, "applied" if applied else "dropped", "follows", "keeps")
+    feed.act(check, "applied" if applied else "dropped", "follows", "keeps", component="gauges")
     if not applied:
         return {"categories": None}
     changed = Pick([Category(name, f"Is this {brief.goal} {name}?") for name in proposed], old.limit)

@@ -190,10 +190,10 @@ async def store(file: str, keywords: list[str], fact: str, gates: dict[str, str]
         failed = [name for name in gates if check[name] < KEEP_THRESHOLD]
         duplicates = [f"same_{index}" for index in range(len(stored)) if check[f"same_{index}"] >= KEEP_THRESHOLD]
         if failed or duplicates:
-            feed.act(check, "dropped", *(failed or duplicates))
+            feed.act(check, "dropped", *(failed or duplicates), component="memory")
             return
         kept = [line for index, line in enumerate(lines) if check[f"contradicts_{index}"] < KEEP_THRESHOLD]
-        feed.act(check, "applied", *gates, *(f"contradicts_{index}" for index in range(len(lines)) if check[f"contradicts_{index}"] >= KEEP_THRESHOLD))
+        feed.act(check, "applied", *gates, *(f"contradicts_{index}" for index in range(len(lines)) if check[f"contradicts_{index}"] >= KEEP_THRESHOLD), component="memory")
         corrected = "corrected" if len(kept) < len(lines) else "stated"
         write(file, aliases + keywords, kept + [f"{fact.rstrip('.')}; {corrected} on {date.today()}."], message)
 
@@ -219,7 +219,7 @@ async def forget(sentence: str) -> None:
     fields = {f"match_{index}": (jev.YesNo, Field(description=f"Does the writer ask jevflow to forget that {fact.words}?")) for index, fact in enumerate(stored)}
     check = await jev.run(create_model("Forget", __doc__=f"The writer typed: '{sentence}'.", **fields), f"Typed: {sentence}")
     matches = [name for name in fields if check[name] >= KEEP_THRESHOLD]
-    feed.act(check, "applied" if matches else "dropped", *(matches or fields))
+    feed.act(check, "applied" if matches else "dropped", *(matches or fields), component="memory")
     async with writes:
         for file in dict.fromkeys(fact.file for index, fact in enumerate(stored) if check[f"match_{index}"] >= KEEP_THRESHOLD):
             aliases, lines = read(file)
@@ -252,7 +252,7 @@ async def search_pages(search: PageSearch) -> dict:
     check = await jev.run(create_model("PageSearch", __doc__="A writer asks jevflow about their other pages.", **fields), f"Question: {search.question}")
     best = max(range(len(search.candidates)), key=lambda index: check[f"answers_{index}"])
     probability = check[f"answers_{best}"]
-    feed.act(check, "shown" if probability >= RELEVANT_THRESHOLD else "dropped", f"answers_{best}")
+    feed.act(check, "shown" if probability >= RELEVANT_THRESHOLD else "dropped", f"answers_{best}", component="memory")
     return search.candidates[best].model_dump() | {"probability": probability} if probability >= RELEVANT_THRESHOLD else {}
 
 
@@ -273,6 +273,7 @@ def record(sentence: str, gate: dict[str, float | str]) -> bool:
         spawn(forget(sentence))
         return True
     if min(gate["memory_note"], gate["memory_lasting"]) >= KEEP_THRESHOLD:
+        feed.act(gate, "applied", "memory_note", "memory_lasting", component="memory")
         spawn(remember(sentence))
     return False
 
@@ -292,6 +293,7 @@ def recall(found: list[Fact], answers: dict[str, float | str]) -> None:
     global recalled
     ranked = sorted((Recall(fact, max(answers[f"relevant_{index}"], answers[f"applies_{index}"])) for index, fact in enumerate(found)), key=lambda recall: recall.probability, reverse=True)
     recalled = [recall for recall in ranked if recall.probability >= RELEVANT_THRESHOLD][:MAX_RECALLED]
+    feed.act(answers, "shown", *(f"{kind}_{index}" for index, fact in enumerate(found) if any(recall.fact is fact for recall in recalled) for kind in ("relevant", "applies")), component="memory")
 
 
 @router.post("/memory/undo")

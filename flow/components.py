@@ -77,7 +77,7 @@ def record(sentence: str, gate: dict[str, float | str]) -> bool:
     toggles = gate["toggles"] >= TOGGLE_GATE
     sentence_toggles[sentence] = (gate["component"], gate["turn"] == "on", gate["toggles"]) if toggles else None
     if toggles:
-        feed.act(gate, "applied", "toggles", "component", "turn")
+        feed.act(gate, "applied", "toggles", "component", "turn", component=None)
     return toggles
 
 
