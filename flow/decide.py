@@ -186,12 +186,15 @@ async def decide_note(sentence: str, comment: str, goal: str, enabled: frozenset
     """Jev gates the sentence while the LLM copies out the note words and writes the header (the local model is free, so it runs on every sentence); Jev then checks both.
 
     When the copied words fail the check, the sentence is a note only if Jev reads all of it as one; a header that fails is replaced by the note words.
-    With a `goal`, a sentence Jev reads as starting something other than it is a `new_page` note: the whole sentence leaves, and its header is the new page's Goal.
+    A sentence Jev reads as asking for a new page, or with a `goal` as starting something other than it, is a `new_page` note: the whole sentence leaves, and its header, when it names the new piece, is the new page's Goal.
     A sentence that asks to turn a component on or off is recorded by `components` and is no note; reaction questions ride only when reactions are `enabled`.
     A goal or `new_page` note that Jev reads as also naming who the text is for files the audience the local model copied as a second header.
     """
     reply = {"reply": (YesNo, Field(description="Is the writer answering the coworker's comment (agreeing, disagreeing, correcting it or asking for the change) rather than writing the text?"))} if comment else {}
-    new_piece = {"new_piece": (YesNo, Field(description=f"Does the writer say they are now writing something other than the {goal}?"))} if goal and "pages" in enabled else {}
+    new_piece = {
+        "new_piece": (YesNo, Field(description="Does the writer ask for a new page" + (f", or say they are now writing something other than the {goal}" if goal else "") + "?")),
+        "names_piece": (YesNo, Field(description="Does the sentence say what the writer will write next?")),
+    } if "pages" in enabled else {}
     NoteGate = create_model(
         "NoteGate",
         __doc__=NOTE_CONTEXT + " The writer keeps several pages, one per piece of writing." + (f" The writer's coworker just commented on the draft: '{comment}'" if comment else ""),
@@ -226,13 +229,13 @@ async def decide_note(sentence: str, comment: str, goal: str, enabled: frozenset
     if gate.get("reply", 0) >= NOTE_GATE:
         feed.act(gate, "applied", "reply")
         return SentenceNote(sentence, gate["reply"], "reply", [])
+    new_page = gate.get("new_piece", 0)
     searches = max(gate["find_page"], gate["open_page"])
-    if searches >= NOTE_GATE:
+    if searches >= NOTE_GATE and new_page < NOTE_GATE:
         feed.act(gate, "applied", "find_page", "open_page")
         return SentenceNote(sentence, searches, "open" if gate["open_page"] >= gate["find_page"] else "find", [])
     asks = min(gate["asks"], gate["is_question"])
-    new_page = gate.get("new_piece", 0)
-    field = "question" if asks >= NOTE_GATE else "new_page" if new_page >= NOTE_GATE else gate["field"]
+    field = "new_page" if new_page >= NOTE_GATE else "question" if asks >= NOTE_GATE else gate["field"]
     probability = max(gate["plan"], asks, new_page)
     if probability < NOTE_GATE:
         feed.act(gate, "silent", "plan", "asks")
@@ -265,6 +268,8 @@ async def decide_note(sentence: str, comment: str, goal: str, enabled: frozenset
         feed.act(header_check, "applied" if fair else "dropped", *decisive)
         return [Header(field, header if fair else fallback)] + ([Header("audience", audience)] if names_audience and header_check["audience"] >= NOTE_THRESHOLD else [])
 
+    if field == "new_page" and gate["names_piece"] < NOTE_GATE:
+        return SentenceNote(sentence, probability, field, [])
     if field == "new_page":
         header_check = await run(HeaderCheck, f"Note: {note}\n\nHeader: {header}")
         seeded = headers("goal", sentence)
