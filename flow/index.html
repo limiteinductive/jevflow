@@ -646,12 +646,12 @@ function liftNotes() {
     if (note.field === "new_page") {
       const [start, end] = removalRange(editor.value, note);
       replaceAll(editor.value.slice(0, start) + editor.value.slice(end), start);
-      openNewPage(note.header);
+      openNewPage(note.headers);
       return;
     }
     const [start, end] = removalRange(editor.value, note);
     applyEdit(start, end, "", `note ${note.text}`);
-    headers.push({ field: note.field, text: note.header });
+    headers.push(...note.headers);
   }
   if (ready.length) insights = [];
   if (thread && thread.answer !== undefined && !thread.reply && sentencesAfter(thread.anchor.end) >= THREAD_FADE_SENTENCES) thread = null;
@@ -1166,8 +1166,8 @@ function loadPage(id, state) {
   editor.focus();
 }
 
-function openNewPage(seedText) {
-  loadPage(Date.now().toString(36), { text: "", headers: seedText ? [{ field: "goal", text: seedText.trim() }] : [], thread: null });
+function openNewPage(seedHeaders) {
+  loadPage(Date.now().toString(36), { text: "", headers: seedHeaders, thread: null });
 }
 
 function restorePage() {
@@ -1189,7 +1189,7 @@ pageList.addEventListener("click", (event) => {
   const page = id && id !== currentPage && readPages()[id];
   if (page) loadPage(id, page.state);
 });
-document.getElementById("new-page").addEventListener("click", () => openNewPage(""));
+document.getElementById("new-page").addEventListener("click", () => openNewPage([]));
 document.getElementById("pages-toggle").addEventListener("click", () => { document.body.classList.toggle("pages-open"); setTimeout(render, 360); });
 if (window.innerWidth > 1100) document.body.classList.add("pages-open");
 

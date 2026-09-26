@@ -60,14 +60,21 @@ ComponentIntent = Literal["yes_no", "question", "instruction", "mention"]
 HeaderField = Literal["goal", "audience", "tone", "to_do", "undo"]
 
 @dataclass(frozen=True)
+class Header:
+    field: HeaderField
+    text: str
+    """The header value, such as "an X post" for "ok im gonna write an x post"."""
+
+
+@dataclass(frozen=True)
 class Note:
     start: int
     end: int
     text: str
     probability: float
     field: NoteField
-    header: str
-    """The note as a header value, such as "an X post" for "ok im gonna write an x post"."""
+    headers: list[Header]
+    """The headers the note files, such as Goal and Audience for "writing a blog post for engineers"; a `new_page` note's headers seed the new page."""
 
 
 @dataclass(frozen=True)
@@ -75,7 +82,7 @@ class SentenceNote:
     text: str
     probability: float
     field: NoteField
-    header: str
+    headers: list[Header]
 
 
 @dataclass(frozen=True)
@@ -170,6 +177,7 @@ async def decide_note(sentence: str, comment: str, goal: str) -> SentenceNote | 
 
     When the copied words fail the check, the sentence is a note only if Jev reads all of it as one; a header that fails is replaced by the note words.
     With a `goal`, a sentence Jev reads as starting something other than it is a `new_page` note: the whole sentence leaves, and its header is the new page's Goal.
+    A goal or `new_page` note that Jev reads as also naming who the text is for files the audience the local model copied as a second header.
     """
     reply = {"reply": (YesNo, Field(description="Is the writer answering the coworker's comment (agreeing, disagreeing, correcting it or asking for the change) rather than writing the text?"))} if comment else {}
     new_piece = {"new_piece": (YesNo, Field(description=f"Does the writer say they are now writing something other than the {goal}?"))} if goal else {}
@@ -180,17 +188,18 @@ async def decide_note(sentence: str, comment: str, goal: str) -> SentenceNote | 
         asks=(YesNo, Field(description="Is the writer asking the assistant for its opinion or help?")),
         is_question=(YesNo, Field(description="Is the sentence a question?")),
         field=(HeaderField, Field(description="What is the note about? goal: what the writer is writing; audience: who it is for; tone: how it should sound; to_do: something to add, check or change; undo: asks to undo the last edit.")),
+        for_whom=(YesNo, Field(description="Does the sentence also say who the text is for?")),
         **reply,
         **new_piece,
         **reactions.fields(goal),
     )
-    gate, (note, header), question = await asyncio.gather(
-        run(NoteGate, f"Sentence: {sentence}"), generator.extract_note(sentence), generator.extract_question(sentence)
+    gate, (note, header), question, audience = await asyncio.gather(
+        run(NoteGate, f"Sentence: {sentence}"), generator.extract_note(sentence), generator.extract_question(sentence), generator.extract_audience(sentence)
     )
     reactions.record(sentence, goal, gate)
     if gate.get("reply", 0) >= NOTE_GATE:
         feed.act(gate, "applied", "reply")
-        return SentenceNote(sentence, gate["reply"], "reply", "")
+        return SentenceNote(sentence, gate["reply"], "reply", [])
     asks = min(gate["asks"], gate["is_question"])
     new_page = gate.get("new_piece", 0)
     field = "question" if asks >= NOTE_GATE else "new_page" if new_page >= NOTE_GATE else gate["field"]
@@ -200,10 +209,10 @@ async def decide_note(sentence: str, comment: str, goal: str) -> SentenceNote | 
         return None
     feed.act(gate, "applied", {"question": "asks", "new_page": "new_piece"}.get(field, "plan"), "field")
     if field == "undo":
-        return SentenceNote(sentence, probability, "undo", "") if len(sentence.split()) <= MAX_NOTE_WORDS else None
+        return SentenceNote(sentence, probability, "undo", []) if len(sentence.split()) <= MAX_NOTE_WORDS else None
     if field == "question":
         span = await question_span(sentence, question)
-        return SentenceNote(span, probability, "question", "") if span else None
+        return SentenceNote(span, probability, "question", []) if span else None
     NoteCheck = create_model(
         "NoteCheck",
         __doc__=NOTE_CONTEXT + f" The sentence is: '{sentence}'.",
@@ -211,17 +220,24 @@ async def decide_note(sentence: str, comment: str, goal: str) -> SentenceNote | 
         whole_note=(YesNo, Field(description=f"Does '{note}' hold the whole note, leaving no note words out?")),
         sentence_only_note=(YesNo, Field(description="Is the whole sentence only about the draft (what it is, who it is for, how it should sound or what to change), with none of the text the writer is writing?")),
     )
+    names_audience = field in ("goal", "new_page") and gate["for_whom"] >= NOTE_GATE and audience != "" and audience in sentence
     HeaderCheck = create_model(
         "HeaderCheck",
         __doc__=f"A writer's note to a writing assistant is filed as a short header at the top of the draft. The note: '{note}'. The header: '{header}'.",
         fair=(YesNo, Field(description="Is the header a fair short version of the note?")),
         adds=(YesNo, Field(description="Does the header add something the note does not say?")),
+        **({"audience": (YesNo, Field(description=f"Does the note say the text is for '{audience}'?"))} if names_audience else {}),
     )
+    decisive = ("fair", "adds", "audience") if names_audience else ("fair", "adds")
+
+    def headers(field: HeaderField, fallback: str) -> list[Header]:
+        fair = min(header_check["fair"], 1 - header_check["adds"]) >= NOTE_THRESHOLD
+        feed.act(header_check, "applied" if fair else "dropped", *decisive)
+        return [Header(field, header if fair else fallback)] + ([Header("audience", audience)] if names_audience and header_check["audience"] >= NOTE_THRESHOLD else [])
+
     if field == "new_page":
         header_check = await run(HeaderCheck, f"Note: {note}\n\nHeader: {header}")
-        fair = min(header_check["fair"], 1 - header_check["adds"]) >= NOTE_THRESHOLD
-        feed.act(header_check, "applied" if fair else "dropped", "fair", "adds")
-        return SentenceNote(sentence, probability, field, header if fair else sentence)
+        return SentenceNote(sentence, probability, field, headers("goal", sentence))
     check, header_check = await asyncio.gather(run(NoteCheck, f"Sentence: {sentence}"), run(HeaderCheck, f"Note: {note}\n\nHeader: {header}"))
     if note not in sentence or min(check["only_note"], check["whole_note"]) < NOTE_THRESHOLD:
         if check["sentence_only_note"] < NOTE_THRESHOLD:
@@ -229,8 +245,7 @@ async def decide_note(sentence: str, comment: str, goal: str) -> SentenceNote | 
             return None
         note = sentence
     feed.act(check, "applied", "only_note", "whole_note")
-    feed.act(header_check, "applied" if min(header_check["fair"], 1 - header_check["adds"]) >= NOTE_THRESHOLD else "dropped", "fair", "adds")
-    return SentenceNote(note, probability, field, header if min(header_check["fair"], 1 - header_check["adds"]) >= NOTE_THRESHOLD else note)
+    return SentenceNote(note, probability, field, headers(field, note))
 
 
 async def question_span(sentence: str, question: str) -> str | None:
@@ -280,7 +295,7 @@ async def find_notes(text: str, comment: str, breaks: list[int], goal: str) -> l
         if decision is None:
             continue
         start = text.find(decision.text, sentence.start)
-        notes.append(Note(start, start + len(decision.text), decision.text, decision.probability, decision.field, decision.header))
+        notes.append(Note(start, start + len(decision.text), decision.text, decision.probability, decision.field, decision.headers))
     return notes
 
 
