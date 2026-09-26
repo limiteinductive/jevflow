@@ -132,31 +132,48 @@ async def score(text: str, brief: Brief, categories: list[Category]) -> Scores:
     return Scores([check[f"category_{index}"] for index in range(len(categories))], time.perf_counter() - began)
 
 
+async def pick(brief: Brief, text: str) -> Pick | None:
+    """The categories and limit for `brief`, chosen once from the draft's first finished sentence; None until `text` has one.
+
+    A failed round is forgotten so the next call retries it.
+    """
+    if brief not in brief_categories:
+        opening = FIRST_SENTENCE.search(text)
+        if not opening:
+            return None
+        brief_categories[brief] = asyncio.create_task(choose_categories(brief, opening.group().strip()))
+        if len(brief_categories) > MAX_BRIEFS:
+            brief_categories.pop(next(iter(brief_categories)))
+    try:
+        return await brief_categories[brief]
+    except Exception:
+        brief_categories.pop(brief, None)
+        raise
+
+
+async def categories(goal: str, text: str) -> list[str]:
+    """The category names for `goal` alone, empty until `text` has a finished first sentence."""
+    chosen = await pick(Brief(goal, "", ""), text)
+    return [category.name for category in chosen.categories] if chosen else []
+
+
 @router.post("/gauges")
 async def gauges(draft: GaugeDraft) -> dict:
     """The gauges for the draft under its brief, and the character limit for this kind of text, if any.
 
     Empty until the draft has a finished first sentence or line, which picks the categories.
     """
-    brief, text, opening = Brief(draft.goal.strip(), draft.audience.strip(), draft.tone.strip()), draft.text.strip(), FIRST_SENTENCE.search(draft.text)
-    if not brief.goal or not text or (brief not in brief_categories and not opening):
+    brief, text = Brief(draft.goal.strip(), draft.audience.strip(), draft.tone.strip()), draft.text.strip()
+    chosen = await pick(brief, draft.text) if brief.goal and text else None
+    if not chosen:
         return {"gauges": [], "limit": None, "seconds": None}
-    if brief not in brief_categories:
-        brief_categories[brief] = asyncio.create_task(choose_categories(brief, opening.group().strip()))
-        if len(brief_categories) > MAX_BRIEFS:
-            brief_categories.pop(next(iter(brief_categories)))
-    try:
-        pick = await brief_categories[brief]
-    except Exception:
-        brief_categories.pop(brief, None)
-        raise
     if (brief, text) not in draft_scores:
-        draft_scores[brief, text] = await score(text, brief, pick.categories)
+        draft_scores[brief, text] = await score(text, brief, chosen.categories)
         if len(draft_scores) > MAX_DRAFTS:
             draft_scores.pop(next(iter(draft_scores)))
     scores = draft_scores[brief, text]
     return {
-        "gauges": [{"name": category.name, "question": category.question, "probability": probability} for category, probability in zip(pick.categories, scores.probabilities)],
-        "limit": pick.limit,
+        "gauges": [{"name": category.name, "question": category.question, "probability": probability} for category, probability in zip(chosen.categories, scores.probabilities)],
+        "limit": chosen.limit,
         "seconds": scores.seconds,
     }
