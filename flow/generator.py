@@ -122,20 +122,20 @@ async def fix(sentence: str) -> str:
     return await chat(FIX_INSTRUCTIONS, FIX_EXAMPLES, sentence, 2 * len(sentence.split()) + 16)
 
 
-async def answers(sentence: str, paragraph: str, question: str, goal: str, count: int) -> list[str]:
+async def answers(sentence: str, paragraph: str, question: str, goal: str, count: int, memory: str) -> list[str]:
     """`count` sampled replies from one batched completion; the prompt is Qwen3's chat template with thinking off, written out because /completions takes raw text.
 
-    mlx_lm.server ignores `n` and returns one reply.
+    mlx_lm.server ignores `n` and returns one reply. `memory` is `flow.memory.context()`.
     """
-    turns = messages(ANSWER_INSTRUCTIONS, ANSWER_EXAMPLES, f"Goal: {goal}\nParagraph: {paragraph}\nLast sentence: {sentence}\nQuestion: {question}")
+    turns = messages(ANSWER_INSTRUCTIONS, ANSWER_EXAMPLES, f"{memory}Goal: {goal}\nParagraph: {paragraph}\nLast sentence: {sentence}\nQuestion: {question}")
     prompt = "".join(f"<|im_start|>{turn['role']}\n{turn['content']}<|im_end|>\n" for turn in turns) + "<|im_start|>assistant\n<think>\n\n</think>\n\n"
     response = await mlx.post("/completions", json={"model": MODEL, "prompt": prompt, "n": count, "max_tokens": 60, "temperature": 0.9})
     response.raise_for_status()
     return [undash(choice["text"].strip()) for choice in response.json()["choices"]]
 
 
-async def revise(sentence: str, comment: str, reply: str) -> str:
-    return undash(await chat(REVISE_INSTRUCTIONS, REVISE_EXAMPLES, f"Sentence: {sentence}\nComment: {comment}\nWriter's reply: {reply}", 2 * len(sentence.split()) + 40))
+async def revise(sentence: str, comment: str, reply: str, memory: str) -> str:
+    return undash(await chat(REVISE_INSTRUCTIONS, REVISE_EXAMPLES, f"{memory}Sentence: {sentence}\nComment: {comment}\nWriter's reply: {reply}", 2 * len(sentence.split()) + 40))
 
 
 async def extract_question(sentence: str) -> str:

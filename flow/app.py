@@ -13,7 +13,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from flow import decide, gauges
+from flow import decide, gauges, memory
 from mirror.model import Stacker
 from mirror.scan import scan
 
@@ -22,6 +22,7 @@ INSIGHT_THRESHOLD = 0.5
 
 app = FastAPI()
 app.include_router(gauges.router)
+app.include_router(memory.router)
 stacker = Stacker.load()
 
 
@@ -97,12 +98,12 @@ async def notes(draft: CommentedDraft) -> dict:
 
 @app.post("/answer")
 async def answer(question: Question) -> dict:
-    return asdict(await decide.answer(question.sentence, question.paragraph, question.question, question.goal))
+    return asdict(await decide.answer(question.sentence, question.paragraph, question.question, question.goal, memory.context()))
 
 
 @app.post("/revise")
 async def revise(reply: Reply) -> dict:
-    return {"replacement": await decide.revise(reply.sentence, reply.comment, reply.reply, reply.proposed)}
+    return {"replacement": await decide.revise(reply.sentence, reply.comment, reply.reply, reply.proposed, memory.context())}
 
 
 @app.post("/fixes")
