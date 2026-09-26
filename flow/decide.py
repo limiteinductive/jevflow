@@ -305,7 +305,7 @@ async def decide_fix(sentence: str, goal: str, categories: list[str]) -> tuple[s
         feed.act(check, "dropped", *hurts)
         return None, None
     feed.act(check, "shown", *hurts)
-    return None, GoalSuggestion(rewrite, comment, [Measure(category, 1 - probability) for probability, category in hurt])
+    return None, GoalSuggestion(rewrite, comment, [Measure(category, f"1 minus P(yes) for: Does the sentence make the text less {category}?", 1 - probability) for probability, category in hurt])
 
 
 async def find_fixes(text: str, limit: int, goal: str, categories: list[str]) -> tuple[list[Fix], list[Suggestion]]:
