@@ -118,13 +118,14 @@ async def log_decisions(request: Request, call_next):
 @app.post("/notes")
 async def notes(draft: CommentedDraft) -> dict:
     enabled = frozenset(components.COMPONENTS) - frozenset(draft.disabled)
-    found, timing = await asyncio.gather(decide.find_notes(draft.text, draft.comment, draft.breaks, draft.goal, enabled), decide.timing(draft.text))
+    found, timing = await asyncio.gather(decide.find_notes(draft.text, draft.comment, draft.breaks, draft.goal, enabled), decide.timing(draft.text, draft.goal, enabled))
     sentences = decide.line_sentences(draft.text, draft.breaks)
     return {
         "notes": [asdict(note) for note in found],
         "timing": asdict(timing),
         "reactions": [asdict(reaction) for reaction in reactions.find(sentences, draft.goal, found)] if "reactions" in enabled else [],
         "toggles": [asdict(toggle) for toggle in components.find(sentences)],
+        "memory": memory.state(),
     }
 
 

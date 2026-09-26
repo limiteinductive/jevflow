@@ -348,7 +348,7 @@ let notes = [], insights = [], headers = [], history = [], flashes = [], reactio
 const declined = new Set();
 let timing = null, pendingFixes = [], pendingSuggestions = [];
 const settled = () => timing !== null && timing.mid_thought < 0.5 && timing.interrupt >= 0.3;
-let gaugesTimer, notesTimer, insightsTimer, fixesTimer, notesRequest = 0, insightsRequest = 0, fixesRequest = 0, memoryRequest = 0;
+let gaugesTimer, notesTimer, insightsTimer, fixesTimer, notesRequest = 0, insightsRequest = 0, fixesRequest = 0;
 
 const escape = (text) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
@@ -740,7 +740,7 @@ function liftNotes() {
 
 async function findNotes() {
   const text = editor.value;
-  if (!text.trim()) return;
+  if (!text.trim()) return renderMemory({ facts: [], recalled: [] });
   const request = ++notesRequest;
   const comment = thread && thread.answer && !thread.reply ? thread.answer : "";
   const breaks = thread && stillThere(thread.anchor) ? [thread.anchor.end] : [];
@@ -748,6 +748,7 @@ async function findNotes() {
   if (request !== notesRequest || editor.value !== text) return;
   notes = result.notes;
   timing = result.timing;
+  if (isOn("memory")) renderMemory(result.memory);
   const limit = typingStart();
   for (const toggle of result.toggles) {
     if (toggle.end > limit || editor.value.slice(toggle.start, toggle.end) !== toggle.text) continue;
@@ -1164,7 +1165,7 @@ editor.addEventListener("input", () => {
   clearTimeout(insightsTimer);
   clearTimeout(fixesTimer);
   clearTimeout(gaugesTimer);
-  notesTimer = setTimeout(() => { findNotes(); findMemory(); }, 600);
+  notesTimer = setTimeout(findNotes, 600);
   gaugesTimer = setTimeout(refreshGauges, 600);
   insightsTimer = setTimeout(findInsights, 900);
   fixesTimer = setTimeout(findFixes, 900);
@@ -1193,23 +1194,6 @@ function renderMemory(memory) {
   }
   box.innerHTML = `<ul>${items.join("")}</ul>`;
   setTimeout(() => box.classList.add("shown"), 20);
-}
-
-async function findMemory() {
-  if (!isOn("memory")) return;
-  const text = editor.value;
-  const request = ++memoryRequest;
-  if (!text.trim()) return renderMemory({ facts: [], recalled: [] });
-  const memory = await post("/memory/pause", { text });
-  if (request !== memoryRequest) return;
-  for (const sentence of memory.forgets) {
-    const start = editor.value.indexOf(sentence);
-    if (start < 0) continue;
-    const [from, to] = removalRange(editor.value, { start, end: start + sentence.length });
-    replaceAll(editor.value.slice(0, from) + editor.value.slice(to), from);
-  }
-  renderMemory(memory);
-  render();
 }
 
 const PAGES_KEY = "jevflow.pages", CURRENT_PAGE_KEY = "jevflow.currentPage", SAVE_MS = 500;
