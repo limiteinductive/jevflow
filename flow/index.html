@@ -889,8 +889,7 @@ async function findNotes() {
   liftNotes();
   render();
   rescoreProbes();
-  const settledLimit = typingStart();
-  refSpans(editor.value, REF_SPAN).filter((span) => !handledRefs.has(span.text) && (span.end <= settledLimit || result.timing.mid_thought < 0.5)).forEach(handleRef);
+  refSpans(editor.value, REF_SPAN).filter((span) => !handledRefs.has(span.text)).forEach(handleRef);
   refreshGauges();
   if (editor.value !== text) insightsTimer = setTimeout(findInsights, 300);
 }
