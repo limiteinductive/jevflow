@@ -369,7 +369,6 @@ const asksLayer = document.getElementById("asks");
 const headersBox = document.getElementById("headers");
 const commentsLayer = document.getElementById("comments");
 const reactionsLayer = document.getElementById("reactions");
-const THREAD_FADE_SENTENCES = 2;
 let thread = null;
 let notes = [], insights = [], headers = [], history = [], flashes = [], reactions = [];
 let reacted = new Set();
@@ -573,10 +572,6 @@ function previousSentence(text, position) {
   let start = boundary + 1;
   while (/\s/.test(before[start] || "")) start += 1;
   return { start, end: before.length, text: before.slice(start) };
-}
-
-function sentencesAfter(position) {
-  return (editor.value.slice(position, typingStart()).match(/[.!?\n]/g) || []).length;
 }
 
 const SEARCH_STOPWORDS = new Set("i me my mine we us our is it to of in on at a an the and did said say what where when who how about into from that this with have had was were you your yours for are can could would should there their them then than take bring open show find wrote write written page pages one some".split(" "));
@@ -843,7 +838,7 @@ function liftNotes() {
     headers.push(...note.headers);
   }
   if (ready.length) insights = [];
-  if (thread && thread.answer !== undefined && !thread.reply && sentencesAfter(thread.anchor.end) >= THREAD_FADE_SENTENCES) thread = null;
+  if (thread && thread.answer !== undefined && !thread.reply && /\n[^\n]*\w[^\n]*[.!?\n]/.test(editor.value.slice(thread.anchor.end, typingStart()).replace(REF_SPAN, ""))) thread = null;
 }
 
 async function findNotes() {
