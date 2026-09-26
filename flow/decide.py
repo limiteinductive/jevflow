@@ -10,7 +10,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, create_model
 from pydantic_ai import Agent
 
-from flow import generator
+from flow import feed, generator
 from text_processing import Sentence, split_sentences
 
 MODEL = "typesafe:jev-latest"
@@ -87,9 +87,6 @@ agent = Agent(MODEL)
 sentence_notes: dict[tuple[str, str], SentenceNote | None] = {}
 """Decisions by sentence text; the page asks about the whole draft on every pause, so each sentence is decided once."""
 
-decisions = 0
-"""Jev questions answered since the server started, one per yes/no or choice field."""
-
 sentence_fixes: dict[str, str | None] = {}
 """Jev-accepted replacements by sentence text, decided once per sentence like `sentence_notes`."""
 
@@ -104,12 +101,9 @@ def line_sentences(text: str) -> list[Sentence]:
 
 
 async def run(output_type: type[BaseModel], prompt: str) -> dict[str, float | str]:
-    """P(yes) for every yes/no field, and the chosen option for every other field."""
-    global decisions
-    result = await agent.run(prompt, output_type=output_type)
-    probabilities = result.response.provider_details["probabilities"]
-    decisions += len(probabilities)
-    return {name: probabilities[name]["yes"] if "yes" in probabilities[name] else getattr(result.output, name) for name in probabilities}
+    """P(yes) for every yes/no field, and the chosen option for every other field; `feed.act` marks what the page does with them."""
+    _, answers = await feed.ask(agent, prompt, output_type)
+    return answers
 
 
 async def decide_note(sentence: str, comment: str) -> SentenceNote | None:
@@ -131,12 +125,15 @@ async def decide_note(sentence: str, comment: str) -> SentenceNote | None:
         run(NoteGate, f"Sentence: {sentence}"), generator.extract_note(sentence), generator.extract_question(sentence)
     )
     if gate.get("reply", 0) >= NOTE_GATE:
+        feed.act(gate, "applied", "reply")
         return SentenceNote(sentence, gate["reply"], "reply", "")
     asks = min(gate["asks"], gate["is_question"])
     field = "question" if asks >= NOTE_GATE else gate["field"]
     probability = max(gate["plan"], asks)
     if probability < NOTE_GATE:
+        feed.act(gate, "silent", "plan", "asks")
         return None
+    feed.act(gate, "applied", "asks" if field == "question" else "plan", "field")
     if field == "undo":
         return SentenceNote(sentence, probability, "undo", "") if len(sentence.split()) <= MAX_NOTE_WORDS else None
     if field == "question":
@@ -157,8 +154,11 @@ async def decide_note(sentence: str, comment: str) -> SentenceNote | None:
     check, header_check = await asyncio.gather(run(NoteCheck, f"Sentence: {sentence}"), run(HeaderCheck, f"Note: {note}\n\nHeader: {header}"))
     if note not in sentence or min(check["only_note"], check["whole_note"]) < NOTE_THRESHOLD:
         if check["sentence_only_note"] < NOTE_THRESHOLD:
+            feed.act(check, "dropped", "sentence_only_note")
             return None
         note = sentence
+    feed.act(check, "applied", "only_note", "whole_note")
+    feed.act(header_check, "applied" if min(header_check["fair"], 1 - header_check["adds"]) >= NOTE_THRESHOLD else "dropped", "fair", "adds")
     return SentenceNote(note, probability, field, header if min(header_check["fair"], 1 - header_check["adds"]) >= NOTE_THRESHOLD else note)
 
 
@@ -172,6 +172,7 @@ async def question_span(sentence: str, question: str) -> str:
         whole_question=(YesNo, Field(description=f"Does '{question}' hold the whole question, leaving none of its words out?")),
     )
     check = await run(QuestionCheck, f"Typed: {sentence}")
+    feed.act(check, "applied" if check["whole_question"] >= NOTE_THRESHOLD else "dropped", "whole_question")
     return question if check["whole_question"] >= NOTE_THRESHOLD else sentence
 
 
@@ -205,6 +206,7 @@ async def decide_fix(sentence: str) -> str | None:
         real_mistake=(YesNo, Field(description="Does the correction fix a real mistake in the sentence?")),
     )
     check = await run(FixCheck, f"Sentence: {sentence}\n\nCorrection: {replacement}")
+    feed.act(check, "applied" if min(check.values()) >= FIX_THRESHOLD else "dropped", min(check, key=check.get))
     return replacement if min(check.values()) >= FIX_THRESHOLD else None
 
 
@@ -251,6 +253,8 @@ async def answer(sentence: str, paragraph: str, question: str, goal: str) -> Ans
         if max(answers for _, answers, _ in ranked) >= ANSWER_FLOOR:
             break
     meta = await meta_task
+    feed.act(check, "shown", *(f"{name}_{drafts.index(ranked[0][2])}" for name in ("answers", "specific", "voice")))
+    feed.act(meta, "shown" if meta["kind"] == "understand" else "silent", "kind", "reader_gets")
     measures = [Measure("answers your question", ranked[0][1])]
     if meta["kind"] == "understand":
         measures.insert(0, Measure("readers get it", meta["reader_gets"]))
@@ -269,4 +273,5 @@ async def revise(sentence: str, comment: str) -> str | None:
         only_text=(YesNo, Field(description="Is the rewrite only text the writer would send, with no advice, commentary or formatting marks in it?")),
     )
     check = await run(ReviseCheck, f"Sentence: {sentence}\n\nRewrite: {replacement}")
+    feed.act(check, "applied" if replacement and min(check.values()) >= FIX_THRESHOLD else "dropped", min(check, key=check.get))
     return replacement if replacement and min(check.values()) >= FIX_THRESHOLD else None
