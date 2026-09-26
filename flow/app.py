@@ -3,6 +3,7 @@
 Run: `uv run python -m flow.app`, then open http://127.0.0.1:8000
 """
 
+import asyncio
 import time
 from dataclasses import asdict
 from pathlib import Path
@@ -49,12 +50,16 @@ class Reply(BaseModel):
     sentence: str
     comment: str
     reply: str
+    proposed: str = ""
+    """A rewrite the comment already showed, checked instead of a fresh one."""
 
 
 class TypedDraft(BaseModel):
     text: str
     limit: int
     """Offset where the sentence being typed starts; only text before it is edited."""
+    goal: str = ""
+    """The Goal header, or empty; its gauge categories drive the goal suggestions."""
 
 
 @app.get("/")
@@ -89,7 +94,8 @@ async def log_decisions(request: Request, call_next):
 
 @app.post("/notes")
 async def notes(draft: CommentedDraft) -> dict:
-    return {"notes": [asdict(note) for note in await decide.find_notes(draft.text, draft.comment, draft.breaks)]}
+    found, timing = await asyncio.gather(decide.find_notes(draft.text, draft.comment, draft.breaks), decide.timing(draft.text))
+    return {"notes": [asdict(note) for note in found], "timing": asdict(timing)}
 
 
 @app.post("/answer")
@@ -99,12 +105,19 @@ async def answer(question: Question) -> dict:
 
 @app.post("/revise")
 async def revise(reply: Reply) -> dict:
-    return {"replacement": await decide.revise(reply.sentence, reply.comment, reply.reply)}
+    return {"replacement": await decide.revise(reply.sentence, reply.comment, reply.reply, reply.proposed)}
 
 
 @app.post("/fixes")
 async def fixes(draft: TypedDraft) -> dict:
-    return {"fixes": [asdict(fix) for fix in await decide.find_fixes(draft.text, draft.limit)]}
+    goal, categories = draft.goal.strip(), []
+    if goal:
+        try:
+            categories = await gauges.categories(goal)
+        except Exception as error:
+            print(f"/fixes: no goal categories ({error!r}); corrections only", flush=True)
+    fixes, suggestions = await decide.find_fixes(draft.text, draft.limit, goal if categories else "", categories)
+    return {"fixes": [asdict(fix) for fix in fixes], "suggestions": [asdict(suggestion) for suggestion in suggestions]}
 
 
 if __name__ == "__main__":

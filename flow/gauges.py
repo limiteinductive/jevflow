@@ -69,22 +69,27 @@ async def score(text: str, goal: str, categories: list[str]) -> list[float]:
     return [check[f"category_{index}"] for index in range(len(categories))]
 
 
+async def categories(goal: str) -> list[str]:
+    """The kept categories for `goal`, chosen once per goal; a failed round is forgotten so the next call retries it."""
+    if goal not in goal_categories:
+        goal_categories[goal] = asyncio.create_task(choose_categories(goal))
+    try:
+        return await goal_categories[goal]
+    except Exception:
+        goal_categories.pop(goal, None)
+        raise
+
+
 @router.post("/gauges")
 async def gauges(draft: GaugeDraft) -> dict:
     """The gauges for the draft under its goal, and the character limit when the goal is an X post; empty when there is no goal or no draft."""
     goal, text = draft.goal.strip(), draft.text.strip()
     if not goal or not text:
         return {"gauges": [], "limit": None}
-    if goal not in goal_categories:
-        goal_categories[goal] = asyncio.create_task(choose_categories(goal))
-    try:
-        categories = await goal_categories[goal]
-    except Exception:
-        goal_categories.pop(goal, None)
-        raise
+    kept = await categories(goal)
     if (goal, text) not in draft_scores:
-        draft_scores[goal, text] = await score(text, goal, categories)
+        draft_scores[goal, text] = await score(text, goal, kept)
     return {
-        "gauges": [{"name": category, "probability": probability} for category, probability in zip(categories, draft_scores[goal, text])],
+        "gauges": [{"name": category, "probability": probability} for category, probability in zip(kept, draft_scores[goal, text])],
         "limit": X_POST_LIMIT if X_POST.search(goal) else None,
     }
