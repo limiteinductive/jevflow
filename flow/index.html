@@ -157,12 +157,12 @@
   }
   .reaction:hover::after { opacity: 1; }
   @keyframes reaction-in { from { opacity: 0; transform: translateY(-20%) scale(0.6); } }
-  #memory { font: 12.5px/1.5 -apple-system, "Helvetica Neue", sans-serif; color: var(--faint); margin: -1.6rem 0 2.4rem; }
-  #memory summary { cursor: pointer; color: var(--ink); font-weight: 600; list-style: none; display: flex; align-items: center; gap: 6px; }
-  #memory ul { margin: 0.3rem 0 0; padding: 0; list-style: none; }
+  #memory { font: 12.5px/1.5 -apple-system, "Helvetica Neue", sans-serif; color: var(--faint); margin: -1.6rem 0 2.4rem; opacity: 0; transition: opacity 0.6s; }
+  #memory.shown { opacity: 1; }
+  #memory:empty { display: none; }
+  #memory ul { margin: 0; padding: 0; list-style: none; }
   #memory li { display: flex; align-items: center; gap: 8px; margin: 2px 0; }
   #memory .ring { flex: none; width: 12px; height: 12px; border-radius: 50%; background: conic-gradient(rgb(var(--thread)) calc(var(--relevance) * 1turn), var(--card-edge) 0); box-shadow: 0 0 calc(var(--relevance) * 8px) rgba(var(--thread), 0.7); }
-  #memory .idle { background: var(--card-edge); box-shadow: none; }
   #pages-toggle {
     position: fixed; top: 14px; left: 14px; z-index: 6; width: 30px; height: 30px; padding: 0; display: grid; place-items: center; cursor: pointer;
     border-radius: 8px; border: 1px solid var(--card-edge); background: var(--card-bg); color: var(--faint); font: 15px/1 -apple-system, sans-serif;
@@ -841,18 +841,24 @@ editor.addEventListener("keydown", (event) => {
 window.addEventListener("resize", render);
 function renderMemory(memory) {
   const box = document.getElementById("memory");
-  if (!memory.facts.length) { box.innerHTML = ""; return; }
-  const relevance = new Map(memory.recalled.map((recall) => [recall.text, recall.probability]));
-  const ring = (probability) => probability === undefined ? '<span class="ring idle"></span>' : `<span class="ring" style="--relevance: ${probability.toFixed(2)}" title="relevant ${Math.round(100 * probability)}%"></span>`;
-  const items = memory.facts.map((fact) => `<li title="${fact.day}">${ring(relevance.get(fact.text))}${escape(fact.words)}</li>`);
-  const open = box.querySelector("details")?.open ? " open" : "";
-  box.innerHTML = `<details${open}><summary>${memory.recalled.map((recall) => ring(recall.probability)).join("")}What jevflow knows about you</summary><ul>${items.join("")}</ul></details>`;
+  const facts = new Map(memory.facts.map((fact) => [fact.text, fact]));
+  const items = memory.recalled.filter((recall) => facts.has(recall.text)).map((recall) => {
+    const fact = facts.get(recall.text);
+    return `<li title="${fact.day}"><span class="ring" style="--relevance: ${recall.probability.toFixed(2)}" title="relevant ${Math.round(100 * recall.probability)}%"></span>${escape(fact.words)}</li>`;
+  });
+  if (!items.length) {
+    box.classList.remove("shown");
+    setTimeout(() => { if (!box.classList.contains("shown")) box.innerHTML = ""; }, 600);
+    return;
+  }
+  box.innerHTML = `<ul>${items.join("")}</ul>`;
+  setTimeout(() => box.classList.add("shown"), 20);
 }
 
 async function findMemory() {
   const text = editor.value;
-  if (!text.trim()) return;
   const request = ++memoryRequest;
+  if (!text.trim()) return renderMemory({ facts: [], recalled: [] });
   const memory = await post("/memory/pause", { text });
   if (request !== memoryRequest) return;
   for (const sentence of memory.forgets) {
@@ -946,7 +952,6 @@ document.getElementById("new-page").addEventListener("click", () => openNewPage(
 document.getElementById("pages-toggle").addEventListener("click", () => { document.body.classList.toggle("pages-open"); setTimeout(render, 360); });
 if (window.innerWidth > 1100) document.body.classList.add("pages-open");
 
-fetch("/memory").then((response) => response.json()).then(renderMemory);
 restorePage();
 render();
 </script>
