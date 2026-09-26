@@ -219,7 +219,7 @@ async def decide_note(sentence: str, comment: str, goal: str, enabled: frozenset
         for_whom=(YesNo, Field(description="Does the sentence also say who the text is for?")),
         for_assistant=(YesNo, Field(description="Is the sentence addressed to the writing assistant (a comment, reply, question or instruction to it), rather than part of the text the writer is writing?")),
         find_page=(YesNo, Field(description="Does the writer ask about something they wrote before, rather than about this text?")),
-        open_page=(YesNo, Field(description="Is the sentence a command to switch to another page, like 'open the tacos one' or 'take me to my essay'?")),
+        open_page=(YesNo, Field(description="Does the writer ask the assistant to take them to another of their own pages, like 'open the tacos one' or 'go to my essay', rather than tell their reader where to look?")),
         **reply,
         **new_piece,
         **components.fields(),
