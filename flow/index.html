@@ -1502,6 +1502,12 @@ pageList.addEventListener("click", (event) => {
   if (page) loadPage(id, page.state);
 });
 document.getElementById("new-page").addEventListener("click", () => openNewPage([]));
+window.addEventListener("pagehide", () => {
+  clearTimeout(saveTimer);
+  clearTimeout(caretTimer);
+  savePage();
+  saveCaret();
+});
 document.addEventListener("selectionchange", () => {
   if (document.activeElement !== editor) return;
   clearTimeout(caretTimer);
