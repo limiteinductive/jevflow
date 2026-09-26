@@ -14,6 +14,7 @@ from typing import Literal
 from pydantic import Field, create_model
 from pydantic_ai import Agent
 
+from flow import feed
 from mirror.questions import QUESTIONS
 
 MODEL = "typesafe:jev-latest"
@@ -45,12 +46,13 @@ async def ask(state: str, semaphore: asyncio.Semaphore) -> dict:
     """Return {"key", "probabilities": {name: P(yes)}, "input_tokens", "seconds"} for one state, or {"error"} on failure (not cached)."""
     key = hashlib.sha256(f"{MODEL}\n{BANK_KEY}\n{state}".encode()).hexdigest()
     if key in _cache:
+        feed.record(state, Bank, {name: {"yes": probability, "no": 1 - probability} for name, probability in _cache[key]["probabilities"].items()}, None, {}, 0, 0)
         return _cache[key]
     async with semaphore:
         loop = asyncio.get_running_loop()
         start = loop.time()
         try:
-            result = await agent.run(state)
+            result, _ = await feed.ask(agent, state)
         except Exception as error:
             return {"key": key, "error": f"{type(error).__name__}: {error}"[:500]}
         seconds = loop.time() - start

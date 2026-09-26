@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Flow</title>
 <style>
+  :root { --feed-width: 372px; --feed-bg: rgba(250, 250, 252, 0.86); --track: rgba(120, 120, 130, 0.16); --applied: 52, 168, 96; --shown: 64, 118, 232; --dropped: 214, 76, 64; --silent: 150, 150, 160; }
+  @media (prefers-color-scheme: dark) { :root { --feed-bg: rgba(22, 22, 26, 0.86); --track: rgba(200, 200, 210, 0.12); --applied: 88, 200, 124; --shown: 110, 160, 255; --dropped: 240, 110, 96; --silent: 120, 120, 130; } }
   :root { --ink: #1c1c1e; --faint: #8e8e96; --note: #9a9aa2; --note-bg: #f0f0f3; --paper: #fbfbfa; --style: 214, 120, 40; --ask-bg: #fff6ea; --ask-ink: #8a4b12; --fix: 60, 150, 90; --thread: 60, 110, 220; --card-bg: #ffffff; --card-edge: #e3e3e8; }
   @media (prefers-color-scheme: dark) {
     :root { --ink: #e8e8ea; --faint: #6e6e76; --note: #74747c; --note-bg: #26262a; --paper: #151517; --style: 230, 150, 70; --ask-bg: #2b2117; --ask-ink: #f0b477; --fix: 90, 190, 120; --thread: 110, 160, 255; --card-bg: #1f1f23; --card-edge: #34343a; }
@@ -56,6 +58,73 @@
   .gauge:hover::after { content: attr(data-level); position: absolute; top: -20px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--paper); padding: 1px 6px; border-radius: 4px; white-space: nowrap; }
   .count { align-self: center; font-variant-numeric: tabular-nums; color: var(--ink); }
   .count.over { color: rgb(200, 60, 50); font-weight: 600; }
+  .page { transition: margin-left 0.35s cubic-bezier(0.2, 0.8, 0.2, 1); }
+  body.feed-open .page { margin-left: max(16px, calc(50vw - 690px)); }
+  #feed-toggle {
+    position: fixed; top: 14px; right: 14px; z-index: 6; width: 30px; height: 30px; padding: 0; display: grid; place-items: center; cursor: pointer;
+    border-radius: 8px; border: 1px solid var(--card-edge); background: var(--card-bg); color: var(--faint); transition: right 0.35s cubic-bezier(0.2, 0.8, 0.2, 1), color 0.2s;
+  }
+  #feed-toggle:hover { color: var(--ink); }
+  body.feed-open #feed-toggle { right: calc(var(--feed-width) + 14px); color: rgb(var(--shown)); }
+  #feed {
+    position: fixed; top: 0; right: 0; bottom: 0; width: var(--feed-width); z-index: 5; overflow-y: auto; overscroll-behavior: contain; box-sizing: border-box;
+    background: var(--feed-bg); backdrop-filter: blur(18px) saturate(1.4); -webkit-backdrop-filter: blur(18px) saturate(1.4); border-left: 1px solid var(--card-edge);
+    font: 12px/1.35 -apple-system, "Helvetica Neue", sans-serif; color: var(--ink); transform: translateX(100%); transition: transform 0.35s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  body.feed-open #feed { transform: none; }
+  .feed-totals { position: sticky; top: 0; z-index: 1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 16px 16px 10px; background: var(--feed-bg); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); border-bottom: 1px solid var(--card-edge); }
+  .feed-totals div { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--faint); }
+  .feed-totals b { display: block; font: 600 21px/1.1 "SF Mono", ui-monospace, Menlo, monospace; letter-spacing: -0.02em; color: var(--ink); text-transform: none; }
+  .feed-legend { grid-column: 1 / -1; display: flex; gap: 12px; text-transform: none; letter-spacing: 0; }
+  .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; flex: none; background: rgb(var(--silent)); }
+  .dot.applied { background: rgb(var(--applied)); box-shadow: 0 0 6px rgba(var(--applied), 0.7); }
+  .dot.shown { background: rgb(var(--shown)); box-shadow: 0 0 6px rgba(var(--shown), 0.7); }
+  .dot.dropped { background: rgb(var(--dropped)); }
+  .dot.silent { background: transparent; box-shadow: inset 0 0 0 1.5px rgb(var(--silent)); }
+  .dot.pending { background: var(--track); }
+  .feed-pause { padding: 12px 16px 8px; border-bottom: 1px solid var(--card-edge); }
+  .feed-pause header { display: flex; align-items: baseline; gap: 8px; font-variant-numeric: tabular-nums; color: var(--faint); font-size: 11px; }
+  .feed-pause header b { color: var(--ink); font-weight: 600; }
+  .feed-pause header .seconds { margin-left: auto; font-family: "SF Mono", ui-monospace, Menlo, monospace; }
+  .strip { display: flex; align-items: flex-end; gap: 1px; height: 22px; margin: 6px 0 4px; }
+  .strip i { flex: 1; max-width: 6px; min-height: 2px; border-radius: 1px; background: rgb(var(--silent)); opacity: 0.55; transform-origin: bottom; }
+  .strip i.applied { background: rgb(var(--applied)); opacity: 1; }
+  .strip i.shown { background: rgb(var(--shown)); opacity: 1; }
+  .strip i.dropped { background: rgb(var(--dropped)); opacity: 0.8; }
+  .strip i.fresh { animation: rise 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both; animation-delay: calc(var(--index) * 12ms); }
+  .feed-call { margin-top: 6px; padding: 4px 6px 4px 8px; border-radius: 6px; border-left: 2px solid transparent; }
+  .feed-call.applied { border-left-color: rgb(var(--applied)); background: rgba(var(--applied), 0.07); }
+  .feed-call.shown { border-left-color: rgb(var(--shown)); background: rgba(var(--shown), 0.07); }
+  .feed-call.cached { opacity: 0.55; }
+  .feed-call.acted { animation: acted 1.2s ease; }
+  .feed-call h4 { display: flex; align-items: center; gap: 6px; margin: 0 0 3px; font-size: 10.5px; font-weight: 500; color: var(--faint); }
+  .feed-call h4 b { color: var(--ink); font-weight: 600; }
+  .feed-call h4 span:last-child { margin-left: auto; font-family: "SF Mono", ui-monospace, Menlo, monospace; }
+  .feed-row { display: grid; grid-template-columns: 72px 30px 1fr; gap: 8px; align-items: center; height: 17px; border-radius: 4px; }
+  .feed-row.fresh { animation: slide 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) both; animation-delay: calc(var(--index) * 22ms); }
+  .feed-row .value { font: 600 10.5px "SF Mono", ui-monospace, Menlo, monospace; text-align: right; }
+  .feed-row .text { font-size: 10.5px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .glyph { display: flex; align-items: flex-end; gap: 2px; height: 10px; }
+  .glyph.hatch { position: relative; height: 7px; border: 1px solid rgba(var(--style), 0.35); border-radius: 1px; background: repeating-linear-gradient(135deg, rgba(var(--style), 0.14) 0 1px, transparent 1px 4px); }
+  .glyph.hatch b { position: absolute; inset: 0 auto 0 0; background: repeating-linear-gradient(135deg, rgb(var(--style)) 0 1.5px, rgba(var(--style), 0.35) 1.5px 3px); }
+  .feed-row.fresh .glyph.hatch b { animation: grow 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) both; animation-delay: calc(var(--index) * 22ms + 80ms); }
+  .glyph.ruler i { flex: 1; min-height: 1px; background: rgba(var(--style), 0.3); border-radius: 1px 1px 0 0; }
+  .glyph.ruler i.pick { background: rgb(var(--style)); box-shadow: 0 0 5px rgba(var(--style), 0.6); }
+  .glyph.dots { align-items: center; gap: 3px; }
+  .glyph.dots i { width: 6px; height: 6px; border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(var(--style), 0.5); }
+  .glyph.dots i.pick { background: rgb(var(--style)); box-shadow: 0 0 5px rgba(var(--style), 0.6); }
+  .feed-row .kind { font: 500 8.5px "SF Mono", ui-monospace, Menlo, monospace; letter-spacing: 0.08em; opacity: 0.55; margin-right: 5px; }
+  .feed-row .text em { font-style: normal; color: var(--ink); font-weight: 600; margin-right: 4px; }
+  .judged { border-radius: 3px; background: rgba(var(--shown), 0.28); box-shadow: 0 0 0 2px rgba(var(--shown), 0.28); }
+  .feed-call { cursor: default; }
+  .feed-row.key { background: rgba(var(--shown), 0.1); }
+  .feed-row.key .text { color: var(--ink); }
+  .feed-more { font-size: 10px; color: var(--faint); padding-left: 112px; }
+  .feed-empty { padding: 24px 16px; color: var(--faint); font-size: 11.5px; }
+  @keyframes slide { from { opacity: 0; transform: translateX(14px); } }
+  @keyframes grow { from { width: 0; } }
+  @keyframes rise { from { transform: scaleY(0); } }
+  @keyframes acted { 0% { box-shadow: 0 0 0 0 rgba(var(--shown), 0.5); } 100% { box-shadow: 0 0 0 10px rgba(var(--shown), 0); } }
 </style>
 </head>
 <body>
@@ -69,6 +138,16 @@
     <div id="comments"></div>
   </div>
 </div>
+<button id="feed-toggle" tabindex="-1" title="Decisions (Cmd+J)" aria-label="Decisions"><svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="7" width="2.4" height="6" rx="1"/><rect x="5.8" y="2" width="2.4" height="11" rx="1"/><rect x="10.6" y="5" width="2.4" height="8" rx="1"/></svg></button>
+<aside id="feed" aria-label="Decisions">
+  <div class="feed-totals">
+    <div><b id="feed-decisions">0</b>decisions</div>
+    <div><b id="feed-median">0.00s</b>median call</div>
+    <div><b id="feed-dollars">$0.000</b>cost</div>
+    <div class="feed-legend"><span><i class="dot applied"></i> applied</span><span><i class="dot shown"></i> shown</span><span><i class="dot dropped"></i> dropped</span><span><i class="dot silent"></i> silent</span></div>
+  </div>
+  <div id="feed-pauses"><div class="feed-empty">Pause while typing: every decision lands here.</div></div>
+</aside>
 <script>
 const FIELDS = { goal: "Goal", audience: "Audience", tone: "Tone", to_do: "To do" };
 const MAX_OPEN_QUESTIONS = 3;
@@ -116,6 +195,7 @@ function render() {
   if (thread) relocate(thread.anchor);
   const marks = [];
   if (thread && stillThere(thread.anchor)) marks.push({ start: thread.anchor.start, end: thread.anchor.end, open: '<span class="anchor" data-thread="1">' });
+  if (judged && stillThere(judged)) marks.push({ start: judged.start, end: judged.end, open: '<span class="judged">' });
   for (const flash of flashes.filter(stillThere)) marks.push({ start: flash.start, end: flash.end, open: '<span class="fixed">' });
   for (const note of notes.filter(stillThere)) {
     if (marks.some((mark) => mark.start < note.end && note.start < mark.end)) continue;
@@ -234,7 +314,7 @@ function suggest(suggestions) {
 }
 
 async function post(path, body) {
-  const response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json", "X-Pause": `${PAGE_LOAD} ${inputs}` }, body: JSON.stringify(body) });
   return response.json();
 }
 
@@ -446,7 +526,116 @@ async function refreshGauges() {
   renderGauges();
 }
 
+const PAGE_LOAD = Math.random().toString(36).slice(2);
+const FEED_PAUSES = 10;
+const FEED_ROWS = 6;
+const FEED_POLL_MS = 500;
+const feedPauses = document.getElementById("feed-pauses");
+const feedRecords = new Map(), feedRendered = new Map();
+let inputs = 0, feedVersion = 0, feedTimer = null, judged = null;
+
+function judgedSpan(prompt) {
+  for (const part of prompt.split("\n\n").reverse()) {
+    const value = part.replace(/^[A-Z][\w ]*: /, "").trim();
+    const start = value ? editor.value.indexOf(value) : -1;
+    if (start >= 0) return { start, end: start + value.length, text: value };
+  }
+  return null;
+}
+
+function toggleFeed() {
+  const open = document.body.classList.toggle("feed-open");
+  clearInterval(feedTimer);
+  if (open) { pollFeed(); feedTimer = setInterval(pollFeed, FEED_POLL_MS); }
+  setTimeout(render, 360);
+}
+
+async function pollFeed() {
+  const result = await (await fetch(`/feed?after=${feedVersion}`)).json();
+  if (result.version < feedVersion) { feedVersion = 0; feedRecords.clear(); return; }
+  feedVersion = result.version;
+  document.getElementById("feed-decisions").textContent = result.decisions.toLocaleString();
+  document.getElementById("feed-median").textContent = `${result.median_seconds.toFixed(2)}s`;
+  document.getElementById("feed-dollars").textContent = `$${result.dollars.toFixed(result.dollars < 0.1 ? 4 : 2)}`;
+  if (!result.records.length) return;
+  for (const record of result.records) feedRecords.set(record.id, record);
+  renderFeed();
+}
+
+const attribute = (text) => escape(text).replace(/"/g, "&quot;");
+const KINDS = { "yes/no": "NOUL", score: "SCORE", choice: "CHOICE" };
+
+function glyph(question, probability) {
+  if (question.kind === "yes/no") return `<div class="glyph hatch"><b style="width: ${100 * probability}%"></b></div>`;
+  const options = Object.entries(question.distribution);
+  if (question.kind === "score") return `<div class="glyph ruler">${options.map(([level, share]) => `<i class="${level === String(question.answer) ? "pick" : ""}" style="height: ${Math.max(10, 100 * share)}%"></i>`).join("")}</div>`;
+  return `<div class="glyph dots">${options.map(([option]) => `<i class="${option === String(question.answer) ? "pick" : ""}" title="${attribute(option)}"></i>`).join("")}</div>`;
+}
+
+function answerBar(question) {
+  const probability = question.kind === "yes/no" ? question.answer : question.distribution[question.answer] || 0;
+  return { probability, option: question.kind === "yes/no" ? "" : String(question.answer) };
+}
+
+function renderFeed() {
+  const pauses = new Map();
+  for (const record of [...feedRecords.values()].sort((first, second) => first.id - second.id)) {
+    if (!pauses.has(record.pause)) pauses.set(record.pause, []);
+    pauses.get(record.pause).push(record);
+  }
+  const kept = [...pauses.keys()].slice(-FEED_PAUSES);
+  for (const [id, record] of feedRecords) if (!kept.includes(record.pause)) feedRecords.delete(id);
+  let row = 0;
+  feedPauses.innerHTML = kept.reverse().map((pause) => {
+    const records = pauses.get(pause);
+    const questions = records.flatMap((record) => record.questions.map((question) => ({ question, record })));
+    const live = records.filter((record) => !record.cached);
+    const slowest = live.length ? Math.max(...live.map((record) => record.seconds)) : 0;
+    const strip = questions.map(({ question, record }, index) => {
+      const fresh = !feedRendered.has(record.id) ? " fresh" : "";
+      return `<i class="${record.action || ""}${fresh}" style="height: ${Math.max(8, 100 * answerBar(question).probability)}%; --index: ${index}"></i>`;
+    }).join("");
+    const calls = records.map((record) => {
+      const fresh = !feedRendered.has(record.id);
+      const acted = (fresh ? ["applied", "shown"].includes(record.action) : feedRendered.get(record.id) !== record.action) ? " acted" : "";
+      const ranked = record.questions.length > FEED_ROWS
+        ? [...record.questions].sort((first, second) => record.decisive.includes(second.name) - record.decisive.includes(first.name) || answerBar(second).probability - answerBar(first).probability)
+        : record.questions;
+      const rows = ranked.slice(0, FEED_ROWS).map((question) => {
+        const { probability, option } = answerBar(question);
+        const key = record.decisive.includes(question.name) ? " key" : "";
+        return `<div class="feed-row${key}${fresh ? " fresh" : ""}" style="--index: ${row++}" title="${attribute(question.text)}" data-ref="decision:${record.id}-${question.name}" data-ref-data="${attribute(question.text)} ${Math.round(100 * probability)}%">${glyph(question, probability)}<span class="value">${question.kind === "score" ? escape(option) : probability.toFixed(2)}</span><span class="text"><span class="kind">${KINDS[question.kind]}</span>${option ? `<em>${escape(option)}</em>` : ""}${escape(question.text)}</span></div>`;
+      }).join("");
+      const more = record.questions.length > FEED_ROWS ? `<div class="feed-more">+${record.questions.length - FEED_ROWS} more</div>` : "";
+      return `<div data-record="${record.id}" class="feed-call ${record.action || ""}${record.cached ? " cached" : ""}${acted}"><h4><i class="dot ${record.action || "pending"}" title="${record.action || "no action"}"></i><b>${escape(record.endpoint)}</b>${escape(record.schema)} · ${record.questions.length}<span>${record.cached ? "cache" : `${record.seconds.toFixed(2)}s`}</span></h4>${rows}${more}</div>`;
+    }).join("");
+    return `<section class="feed-pause"><header><span>pause ${pause}</span><b>${questions.length} decisions</b><span class="seconds">${slowest.toFixed(2)} s</span></header><div class="strip">${strip}</div>${calls}</section>`;
+  }).join("");
+  feedRendered.clear();
+  for (const record of feedRecords.values()) feedRendered.set(record.id, record.action);
+}
+
+feedPauses.addEventListener("mouseover", (event) => {
+  const call = event.target.closest("[data-record]");
+  const span = call ? judgedSpan(feedRecords.get(Number(call.dataset.record)).prompt) : null;
+  if (span?.start === judged?.start && span?.end === judged?.end) return;
+  judged = span;
+  render();
+});
+feedPauses.addEventListener("mouseleave", () => { judged = null; render(); });
+
+const feedToggle = document.getElementById("feed-toggle");
+feedToggle.addEventListener("mousedown", (event) => event.preventDefault());
+feedToggle.addEventListener("click", toggleFeed);
+window.addEventListener("keydown", (event) => {
+  if (event.key === "j" && (event.metaKey || event.ctrlKey)) {
+    event.preventDefault();
+    toggleFeed();
+  }
+});
+
 editor.addEventListener("input", () => {
+  inputs += 1;
   timing = null;
   renderGauges();
   clearTimeout(notesTimer);

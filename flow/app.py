@@ -13,7 +13,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from flow import decide, gauges
+from flow import decide, feed, gauges
 from mirror.model import Stacker
 from mirror.scan import scan
 
@@ -22,6 +22,7 @@ INSIGHT_THRESHOLD = 0.5
 
 app = FastAPI()
 app.include_router(gauges.router)
+app.include_router(feed.router)
 stacker = Stacker.load()
 
 
@@ -81,11 +82,13 @@ async def insights(draft: Draft) -> dict:
 
 @app.middleware("http")
 async def log_decisions(request: Request, call_next):
-    """Print how many Jev questions each request asked and how long it took; /insights questions go through mirror.jev and are not counted."""
-    decisions, began = decide.decisions, time.perf_counter()
+    """Tag the request's Jev calls for the feed, and print how many Jev questions it asked and how long it took."""
+    if request.method == "POST":
+        feed.enter(request)
+    decisions, began = feed.decisions, time.perf_counter()
     response = await call_next(request)
     if request.method == "POST":
-        print(f"{request.url.path}: {decide.decisions - decisions} Jev decisions in {time.perf_counter() - began:.2f} s", flush=True)
+        print(f"{request.url.path}: {feed.decisions - decisions} Jev decisions in {time.perf_counter() - began:.2f} s", flush=True)
     return response
 
 

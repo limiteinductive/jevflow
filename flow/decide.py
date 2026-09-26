@@ -12,7 +12,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, create_model
 from pydantic_ai import Agent
 
-from flow import generator
+from flow import feed, generator
 from text_processing import Sentence, split_sentences
 
 MODEL = "typesafe:jev-latest"
@@ -23,6 +23,9 @@ NOTE_GATE = 0.55
 OWN_DRAFT_GATE = 0.3
 """A question lifts only when "about their own draft?" reaches this: questions to the recipient ('want me to grab pad thai') score 0.00 to 0.04, and the demo's run-on 'wdyt?' 0.43 to 0.49."""
 TIMING_CONTEXT_CHARS = 400
+MID_THOUGHT_GATE = 0.5
+INTERRUPT_GATE = 0.3
+"""The page shows unasked suggestions only below `MID_THOUGHT_GATE` on mid_thought and at or above `INTERRUPT_GATE` on interrupt; the feed marks the gate with the same values."""
 NUM_DRAFTS = 3
 DRAFT_CHECKS = {
     "answers": "Does '{draft}' answer the writer's question?",
@@ -129,9 +132,6 @@ agent = Agent(MODEL)
 sentence_notes: dict[tuple[str, str], SentenceNote | None] = {}
 """Decisions by sentence text; the page asks about the whole draft on every pause, so each sentence is decided once."""
 
-decisions = 0
-"""Jev questions answered since the server started, one per yes/no or choice field."""
-
 sentence_fixes: dict[tuple[str, str], tuple[str | None, GoalSuggestion | None]] = {}
 """Jev-accepted correction and goal suggestion by sentence text and Goal, decided once per pair like `sentence_notes`."""
 
@@ -149,12 +149,9 @@ def line_sentences(text: str, breaks: list[int]) -> list[Sentence]:
 
 
 async def run(output_type: type[BaseModel], prompt: str) -> dict[str, float | str]:
-    """P(yes) for every yes/no field, and the chosen option for every other field."""
-    global decisions
-    result = await agent.run(prompt, output_type=output_type)
-    probabilities = result.response.provider_details["probabilities"]
-    decisions += len(probabilities)
-    return {name: probabilities[name]["yes"] if "yes" in probabilities[name] else getattr(result.output, name) for name in probabilities}
+    """P(yes) for every yes/no field, and the chosen option for every other field; `feed.act` marks what the page does with them."""
+    _, answers = await feed.ask(agent, prompt, output_type)
+    return answers
 
 
 async def decide_note(sentence: str, comment: str) -> SentenceNote | None:
@@ -176,12 +173,15 @@ async def decide_note(sentence: str, comment: str) -> SentenceNote | None:
         run(NoteGate, f"Sentence: {sentence}"), generator.extract_note(sentence), generator.extract_question(sentence)
     )
     if gate.get("reply", 0) >= NOTE_GATE:
+        feed.act(gate, "applied", "reply")
         return SentenceNote(sentence, gate["reply"], "reply", "")
     asks = min(gate["asks"], gate["is_question"])
     field = "question" if asks >= NOTE_GATE else gate["field"]
     probability = max(gate["plan"], asks)
     if probability < NOTE_GATE:
+        feed.act(gate, "silent", "plan", "asks")
         return None
+    feed.act(gate, "applied", "asks" if field == "question" else "plan", "field")
     if field == "undo":
         return SentenceNote(sentence, probability, "undo", "") if len(sentence.split()) <= MAX_NOTE_WORDS else None
     if field == "question":
@@ -203,8 +203,11 @@ async def decide_note(sentence: str, comment: str) -> SentenceNote | None:
     check, header_check = await asyncio.gather(run(NoteCheck, f"Sentence: {sentence}"), run(HeaderCheck, f"Note: {note}\n\nHeader: {header}"))
     if note not in sentence or min(check["only_note"], check["whole_note"]) < NOTE_THRESHOLD:
         if check["sentence_only_note"] < NOTE_THRESHOLD:
+            feed.act(check, "dropped", "sentence_only_note")
             return None
         note = sentence
+    feed.act(check, "applied", "only_note", "whole_note")
+    feed.act(header_check, "applied" if min(header_check["fair"], 1 - header_check["adds"]) >= NOTE_THRESHOLD else "dropped", "fair", "adds")
     return SentenceNote(note, probability, field, header if min(header_check["fair"], 1 - header_check["adds"]) >= NOTE_THRESHOLD else note)
 
 
@@ -224,7 +227,9 @@ async def question_span(sentence: str, question: str) -> str | None:
     )
     check = await run(QuestionCheck, f"Typed: {sentence}")
     if check["about_own_draft"] < OWN_DRAFT_GATE:
+        feed.act(check, "dropped", "about_own_draft")
         return None
+    feed.act(check, "applied", "about_own_draft", "whole_question")
     return span if span == sentence or check["whole_question"] >= NOTE_THRESHOLD else sentence
 
 
@@ -237,6 +242,7 @@ async def timing(text: str) -> Timing:
         interrupt=(YesNo, Field(description="Would a suggestion about what they already wrote be welcome now, rather than breaking their flow?")),
     )
     moment = await run(Moment, f"Draft end: {text[-TIMING_CONTEXT_CHARS:]}")
+    feed.act(moment, "applied" if moment["mid_thought"] < MID_THOUGHT_GATE and moment["interrupt"] >= INTERRUPT_GATE else "silent", "mid_thought", "interrupt")
     return Timing(moment["mid_thought"], moment["interrupt"])
 
 
@@ -281,15 +287,20 @@ async def decide_fix(sentence: str, goal: str, categories: list[str]) -> tuple[s
     FixCheck = create_model("FixCheck", __doc__=f"{context} Sentence: '{sentence}'.{correction}", **fields)
     check = await run(FixCheck, f"Sentence: {sentence}" + (f"\n\nCorrection: {replacement}" if corrects else ""))
     if corrects and min(check["keeps_meaning"], check["same_voice"], check["small"], check["real_mistake"], 1 - check["on_purpose"]) >= FIX_THRESHOLD:
+        feed.act(check, "applied", "keeps_meaning", "same_voice", "small", "real_mistake", "on_purpose")
         return replacement, None
     hurt = [(check[f"hurts_{index}"], category) for index, category in enumerate(categories) if check[f"hurts_{index}"] >= HURTS_THRESHOLD]
+    hurts = [f"hurts_{index}" for index in range(len(categories)) if check[f"hurts_{index}"] >= HURTS_THRESHOLD]
     if not hurt:
+        feed.act(check, "dropped" if corrects else "silent", *check)
         return None, None
     against = " and ".join(f"'{category}'" for _, category in hurt)
     comment = f"For {goal}, this sentence works against {against}."
     rewrite = await revise(sentence, comment, "ok")
     if rewrite is None or rewrite == sentence:
+        feed.act(check, "dropped", *hurts)
         return None, None
+    feed.act(check, "shown", *hurts)
     return None, GoalSuggestion(rewrite, comment, [Measure(category, 1 - probability) for probability, category in hurt])
 
 
@@ -340,6 +351,8 @@ async def answer(sentence: str, paragraph: str, question: str, goal: str) -> Ans
         if max(answers for _, answers, _ in ranked) >= ANSWER_FLOOR:
             break
     meta = await meta_task
+    feed.act(check, "shown", *(f"{name}_{drafts.index(ranked[0][2])}" for name in ("answers", "specific", "voice")))
+    feed.act(meta, "shown" if meta["kind"] == "understand" else "silent", "kind", "reader_gets")
     measures = [Measure("answers your question", ranked[0][1])]
     if meta["kind"] == "understand":
         measures.insert(0, Measure("readers get it", meta["reader_gets"]))
@@ -371,4 +384,5 @@ async def revise(sentence: str, comment: str, reply: str, proposed: str = "") ->
         keeps_style=(YesNo, Field(description="Does the rewrite keep the writer's casing and style?")),
     )
     check = await run(ReviseCheck, f"Sentence: {sentence}\n\nRewrite: {replacement}")
+    feed.act(check, "applied" if replacement and min(check.values()) >= FIX_THRESHOLD else "dropped", min(check, key=check.get))
     return replacement if replacement and min(check.values()) >= FIX_THRESHOLD else None

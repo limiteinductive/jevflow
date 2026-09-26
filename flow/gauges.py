@@ -9,7 +9,7 @@ import re
 from fastapi import APIRouter
 from pydantic import BaseModel, Field, create_model
 
-from flow import decide, generator
+from flow import decide, feed, generator
 
 NUM_CATEGORIES = 5
 MIN_GAUGES = 4
@@ -53,6 +53,7 @@ async def choose_categories(goal: str) -> list[str]:
     )
     check = await decide.run(Matters, f"Goal: {goal}")
     ranked = sorted(((check[f"category_{index}"], category) for index, category in enumerate(proposed)), reverse=True)
+    feed.act(check, "applied", *(name for name in check if check[name] >= KEEP_THRESHOLD))
     return [category for rank, (probability, category) in enumerate(ranked) if probability >= KEEP_THRESHOLD or rank < MIN_GAUGES]
 
 
@@ -64,6 +65,7 @@ async def score(text: str, goal: str, categories: list[str]) -> list[float]:
         **{f"category_{index}": (decide.YesNo, Field(description=f"Is the draft {category}?")) for index, category in enumerate(categories)},
     )
     check = await decide.run(Impact, f"Draft: {text}")
+    feed.act(check, "shown", *check)
     return [check[f"category_{index}"] for index in range(len(categories))]
 
 
