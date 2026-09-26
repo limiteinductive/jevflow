@@ -106,6 +106,8 @@
   .feed-row .value { font: 600 10.5px "SF Mono", ui-monospace, Menlo, monospace; text-align: right; }
   .feed-row .text { font-size: 10.5px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .feed-row .text em { font-style: normal; color: var(--ink); font-weight: 600; margin-right: 4px; }
+  .judged { border-radius: 3px; background: rgba(var(--shown), 0.28); box-shadow: 0 0 0 2px rgba(var(--shown), 0.28); }
+  .feed-call { cursor: default; }
   .feed-row.key { background: rgba(var(--shown), 0.1); }
   .feed-row.key .text { color: var(--ink); }
   .feed-more { font-size: 10px; color: var(--faint); padding-left: 112px; }
@@ -181,6 +183,7 @@ function render() {
   if (thread) relocate(thread.anchor);
   const marks = [];
   if (thread && stillThere(thread.anchor)) marks.push({ start: thread.anchor.start, end: thread.anchor.end, open: '<span class="anchor" data-thread="1">' });
+  if (judged && stillThere(judged)) marks.push({ start: judged.start, end: judged.end, open: '<span class="judged">' });
   for (const flash of flashes.filter(stillThere)) marks.push({ start: flash.start, end: flash.end, open: '<span class="fixed">' });
   for (const note of notes.filter(stillThere)) {
     if (marks.some((mark) => mark.start < note.end && note.start < mark.end)) continue;
@@ -492,7 +495,16 @@ const FEED_ROWS = 6;
 const FEED_POLL_MS = 500;
 const feedPauses = document.getElementById("feed-pauses");
 const feedRecords = new Map(), feedRendered = new Map();
-let inputs = 0, feedVersion = 0, feedTimer = null;
+let inputs = 0, feedVersion = 0, feedTimer = null, judged = null;
+
+function judgedSpan(prompt) {
+  for (const part of prompt.split("\n\n").reverse()) {
+    const value = part.replace(/^[A-Z][\w ]*: /, "").trim();
+    const start = value ? editor.value.indexOf(value) : -1;
+    if (start >= 0) return { start, end: start + value.length, text: value };
+  }
+  return null;
+}
 
 function toggleFeed() {
   const open = document.body.classList.toggle("feed-open");
@@ -538,23 +550,32 @@ function renderFeed() {
     }).join("");
     const calls = records.map((record) => {
       const fresh = !feedRendered.has(record.id);
-      const acted = !fresh && feedRendered.get(record.id) !== record.action ? " acted" : "";
+      const acted = (fresh ? ["applied", "shown"].includes(record.action) : feedRendered.get(record.id) !== record.action) ? " acted" : "";
       const ranked = record.questions.length > FEED_ROWS
         ? [...record.questions].sort((first, second) => record.decisive.includes(second.name) - record.decisive.includes(first.name) || answerBar(second).probability - answerBar(first).probability)
         : record.questions;
       const rows = ranked.slice(0, FEED_ROWS).map((question) => {
         const { probability, option } = answerBar(question);
         const key = record.decisive.includes(question.name) ? " key" : "";
-        return `<div class="feed-row${key}${fresh ? " fresh" : ""}" style="--index: ${row++}" title="${escape(question.text)}"><div class="bar"><b style="width: ${100 * probability}%; background: ${gaugeColor(probability)}"></b></div><span class="value">${Math.round(100 * probability)}%</span><span class="text">${option ? `<em>${escape(option)}</em>` : ""}${escape(question.text)}</span></div>`;
+        return `<div class="feed-row${key}${fresh ? " fresh" : ""}" style="--index: ${row++}" title="${escape(question.text)}" data-ref="decision:${record.id}-${question.name}" data-ref-data="${escape(question.text)} ${Math.round(100 * probability)}%"><div class="bar"><b style="width: ${100 * probability}%; background: ${gaugeColor(probability)}"></b></div><span class="value">${Math.round(100 * probability)}%</span><span class="text">${option ? `<em>${escape(option)}</em>` : ""}${escape(question.text)}</span></div>`;
       }).join("");
       const more = record.questions.length > FEED_ROWS ? `<div class="feed-more">+${record.questions.length - FEED_ROWS} more</div>` : "";
-      return `<div class="feed-call ${record.action || ""}${record.cached ? " cached" : ""}${acted}"><h4><i class="dot ${record.action || "pending"}" title="${record.action || "no action"}"></i><b>${escape(record.endpoint)}</b>${escape(record.schema)} · ${record.questions.length}<span>${record.cached ? "cache" : `${record.seconds.toFixed(2)}s`}</span></h4>${rows}${more}</div>`;
+      return `<div data-record="${record.id}" class="feed-call ${record.action || ""}${record.cached ? " cached" : ""}${acted}"><h4><i class="dot ${record.action || "pending"}" title="${record.action || "no action"}"></i><b>${escape(record.endpoint)}</b>${escape(record.schema)} · ${record.questions.length}<span>${record.cached ? "cache" : `${record.seconds.toFixed(2)}s`}</span></h4>${rows}${more}</div>`;
     }).join("");
     return `<section class="feed-pause"><header><span>pause ${pause}</span><b>${questions.length} decisions</b><span class="seconds">${slowest.toFixed(2)} s</span></header><div class="strip">${strip}</div>${calls}</section>`;
   }).join("");
   feedRendered.clear();
   for (const record of feedRecords.values()) feedRendered.set(record.id, record.action);
 }
+
+feedPauses.addEventListener("mouseover", (event) => {
+  const call = event.target.closest("[data-record]");
+  const span = call ? judgedSpan(feedRecords.get(Number(call.dataset.record)).prompt) : null;
+  if (span?.start === judged?.start && span?.end === judged?.end) return;
+  judged = span;
+  render();
+});
+feedPauses.addEventListener("mouseleave", () => { judged = null; render(); });
 
 const feedToggle = document.getElementById("feed-toggle");
 feedToggle.addEventListener("mousedown", (event) => event.preventDefault());

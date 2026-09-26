@@ -54,6 +54,8 @@ class Record:
     action: Action | None = None
     decisive: list[str] = field(default_factory=list)
     """Names of the questions that decided `action`."""
+    prompt: str = ""
+    """The text Jev judged; the page lights up the part of it that is in the draft."""
     cached: bool = False
     """Replayed from a cache: no Jev request was made."""
     answers: dict[str, float | str] = field(default_factory=dict, repr=False)
@@ -80,7 +82,7 @@ def enter(request: Request) -> None:
     origin.set(Origin(pause, request.url.path.strip("/")))
 
 
-def record(schema: type[BaseModel], distributions: dict[str, dict[str, float]], output: BaseModel | None, scores: dict[str, float], seconds: float, tokens: int) -> dict[str, float | str]:
+def record(prompt: str, schema: type[BaseModel], distributions: dict[str, dict[str, float]], output: BaseModel | None, scores: dict[str, float], seconds: float, tokens: int) -> dict[str, float | str]:
     """Keep one Jev request in the feed; returns P(yes) for every yes/no field and the chosen option for every other field.
 
     `output` is None for a cache replay, which holds yes/no fields only.
@@ -98,7 +100,7 @@ def record(schema: type[BaseModel], distributions: dict[str, dict[str, float]], 
     ]
     current = origin.get(OFFLINE)
     answers = {question.name: question.answer for question in questions}
-    records.append(Record(next(ids), next(versions), current.pause, current.endpoint, schema.__name__, questions, time.perf_counter() - began - seconds, seconds, tokens, cached=output is None, answers=answers))
+    records.append(Record(next(ids), next(versions), current.pause, current.endpoint, schema.__name__, questions, time.perf_counter() - began - seconds, seconds, tokens, prompt=prompt, cached=output is None, answers=answers))
     decisions += 0 if output is None else len(questions)
     input_tokens += tokens
     return answers
@@ -109,7 +111,7 @@ async def ask(agent: Agent, prompt: str, output_type: type[BaseModel] | None = N
     started = time.perf_counter()
     result = await agent.run(prompt, output_type=output_type) if output_type else await agent.run(prompt)
     details = result.response.provider_details
-    answers = record(output_type or agent.output_type, details["probabilities"], result.output, details.get("scores", {}), time.perf_counter() - started, result.usage.input_tokens)
+    answers = record(prompt, output_type or agent.output_type, details["probabilities"], result.output, details.get("scores", {}), time.perf_counter() - started, result.usage.input_tokens)
     return result, answers
 
 

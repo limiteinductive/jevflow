@@ -46,7 +46,7 @@ async def ask(state: str, semaphore: asyncio.Semaphore) -> dict:
     """Return {"key", "probabilities": {name: P(yes)}, "input_tokens", "seconds"} for one state, or {"error"} on failure (not cached)."""
     key = hashlib.sha256(f"{MODEL}\n{BANK_KEY}\n{state}".encode()).hexdigest()
     if key in _cache:
-        feed.record(Bank, {name: {"yes": probability, "no": 1 - probability} for name, probability in _cache[key]["probabilities"].items()}, None, {}, 0, 0)
+        feed.record(state, Bank, {name: {"yes": probability, "no": 1 - probability} for name, probability in _cache[key]["probabilities"].items()}, None, {}, 0, 0)
         return _cache[key]
     async with semaphore:
         loop = asyncio.get_running_loop()
