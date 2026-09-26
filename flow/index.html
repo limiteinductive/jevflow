@@ -74,7 +74,7 @@
   .gauge .tip b { color: rgb(var(--thread)); font-weight: 600; }
   .count { align-self: center; margin-left: 8px; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--card-edge); font-variant-numeric: tabular-nums; color: var(--ink); }
   [data-ref] { cursor: pointer; }
-  .pill { border-radius: 4px; background: rgba(var(--thread), 0.16); color: rgb(var(--thread)); }
+  .pill { color: rgb(var(--thread)); text-decoration: underline 1px; text-underline-offset: 3px; }
   .probed { border-radius: 3px; background: rgba(var(--thread), 0.1); }
   #probes { position: absolute; top: 0; left: calc(100% + 28px); }
   .probe { position: absolute; display: flex; align-items: center; gap: 5px; font: 600 11.5px/1 ui-monospace, "SF Mono", Menlo, monospace; color: var(--ink); white-space: nowrap; }
@@ -242,7 +242,7 @@
   .count { border: 0; border-left: 1px solid var(--muted); border-radius: 0; padding: 0 0 0 10px; font-size: 11px; color: var(--faint); }
   .count.over { color: var(--ink); background: none; font-weight: 600; border-left-color: var(--accent); }
   .note, .flag, .fixed, .pill, .judged { border-radius: 0; box-shadow: none; }
-  .pill { background: var(--accent); color: #1E1E1E; }
+  .pill { background: none; color: var(--accent); text-decoration: underline 1px; text-underline-offset: 3px; }
   .anchor { border-bottom: 1px solid var(--accent); background: none; }
   .ask { border-radius: 0; font: 13px/1.6 var(--mono); }
   .card { padding: 0; background: var(--surface); border: 1px solid var(--muted); border-radius: 0; box-shadow: none; font: 14px/1.4 var(--sans); color: var(--ink); }
@@ -764,7 +764,8 @@ async function findNotes() {
   liftNotes();
   render();
   rescoreProbes();
-  if (result.timing.mid_thought < 0.5) refSpans(editor.value, REF_SPAN).filter((span) => !handledRefs.has(span.text)).forEach(handleRef);
+  const settledLimit = typingStart();
+  refSpans(editor.value, REF_SPAN).filter((span) => !handledRefs.has(span.text) && (span.end <= settledLimit || result.timing.mid_thought < 0.5)).forEach(handleRef);
   if ([currentGoal(), latestHeader("audience"), latestHeader("tone")].join("\n") !== gaugeBrief) refreshGauges();
   if (editor.value !== text) insightsTimer = setTimeout(findInsights, 300);
 }
@@ -1071,13 +1072,15 @@ async function handleRef(found) {
     render();
     return;
   }
-  if (result.intent === "question" || result.intent === "yes_no") {
+  const [kind, name] = ref.split(":");
+  if (result.intent === "reply" && thread && thread.answer && ref === `thread:${slug(thread.question || thread.answer || "open")}`) { replyToThread(question); return; }
+  if (result.intent === "set_target" && kind === "gauge" && result.target !== null && typeof setTarget === "function") { setTarget(name, result.target); return; }
+  if (result.answer) {
     const target = previousSentence(editor.value, start);
     thread = { anchor: target.text ? target : anchor, question: span.text, answer: result.answer.text, measures: result.answer.measures };
     render();
     return;
   }
-  const [kind, name] = ref.split(":");
   if (kind === "component" && result.intent.startsWith("turn_")) { setComponent(name, result.intent === "turn_on"); return; }
   if (kind === "component" && name === "gauges" && result.intent === "change") {
     const changed = await post("/gauges/change", { goal: currentGoal(), audience: latestHeader("audience"), tone: latestHeader("tone"), comment: question });

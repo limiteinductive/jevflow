@@ -4,6 +4,7 @@ Every decision is one Jev request with all its questions in one payload.
 """
 
 import asyncio
+import re
 import math
 from itertools import pairwise
 from dataclasses import dataclass, replace
@@ -47,6 +48,7 @@ HURTS_THRESHOLD = 0.7
 OPTION_INSTRUCTIONS = "A writer asks an open question about a part of their draft. Reply with 2 to 4 short possible answers, one per line, each 1 to 4 plain words. Reply with the list only."
 OPTION_EXAMPLES = [("Text: the launch slipped again, as expected\nQuestion: how does this come across?", "neutral\nfrustrated\npassive-aggressive")]
 MAX_OPTIONS = 4
+PERCENT = re.compile(r"(\d{1,3})\s*%")
 OPTION_FIT = 0.5
 """The options are shown only when Jev's P(one of them answers the question) reaches this; otherwise the question gets a one-line reply."""
 NOTE_CONTEXT = "A writer types their text and, in the same stream, notes to a writing assistant such as 'make this punchier', 'this is for engineers', 'im writing a blog post', 'replying to my boss about friday' or 'undo'."
@@ -60,7 +62,7 @@ Scope = Literal["sentence", "paragraph"]
 
 QuestionKind = Literal["understand", "opinion", "cut_or_keep", "true", "wording", "other"]
 
-ComponentIntent = Literal["yes_no", "question", "instruction", "turn_off", "turn_on", "change", "mention"]
+ComponentIntent = Literal["yes_no", "question", "reply", "set_target", "instruction", "turn_off", "turn_on", "change", "mention"]
 
 HeaderField = Literal["goal", "audience", "tone", "to_do", "undo"]
 
@@ -128,6 +130,8 @@ class ComponentReply:
     """The local model's short answers to an open question about a copied span, when Jev says one of them fits."""
     pick: str | None
     """The option Jev chose."""
+    target: float | None
+    """The target the writer set, as a fraction, when they set one on a gauge."""
 
 
 @dataclass(frozen=True)
@@ -464,17 +468,20 @@ async def about_component(span: str, question: str, component: str, text: str, s
     `question` is `span` without the reference; `text` is the copied draft text when the reference is a span, else empty. Only a span gets the yes/no probe; a yes/no question
     about any other component gets the coworker's answer. The answer and the probe run while Jev decides the intent, so neither costs an extra round.
     """
+    numbers = list(dict.fromkeys(PERCENT.findall(question)))
     Intent = create_model(
         "Intent",
         __doc__=f"A writer pasted a reference to a part of their writing assistant's page into their draft. That part: {component}. They typed: '{span}'.",
         intent=(
             ComponentIntent,
             Field(
-                description="yes_no: they ask a yes or no question about that part; question: they ask an open question about it; instruction: they ask to drop, forget or mark done an item; "
+                description="yes_no: they ask a yes or no question about that part; question: they ask an open question about it; reply: they answer or reply to a comment in it; "
+                "set_target: they set a goal or target number for it; instruction: they ask to drop, forget or mark done an item; "
                 "turn_off: they ask to remove, hide or turn off the whole part; turn_on: they ask to bring it back or turn it on; change: they ask to change what it measures or how it works; "
                 "mention: it is part of the text they are writing."
             ),
         ),
+        **({"target": (Literal[tuple(numbers)], Field(description="Which number is the target they want to reach?"))} if len(numbers) > 1 else {}),
     )
     intent, reply, probed, picked = await asyncio.gather(
         run(Intent, f"Typed: {span}"),
@@ -487,9 +494,10 @@ async def about_component(span: str, question: str, component: str, text: str, s
     if probed is not None:
         feed.act(probed, "shown" if probing else "silent", "answer")
     choosing = intent["intent"] == "question" and picked is not None
-    asks = intent["intent"] in ("question", "yes_no") and not probing and not choosing
+    asks = intent["intent"] in ("question", "yes_no", "reply", "set_target") and not probing and not choosing
     options, pick = picked if choosing else (None, None)
-    return ComponentReply(intent["intent"], reply if asks else None, probed["answer"] if probing else None, options, pick)
+    target = int(intent.get("target", numbers[0])) / 100 if intent["intent"] == "set_target" and numbers else None
+    return ComponentReply(intent["intent"], reply if asks else None, probed["answer"] if probing else None, options, pick, target)
 
 
 async def pick_option(question: str, text: str) -> tuple[list[str], str] | None:
