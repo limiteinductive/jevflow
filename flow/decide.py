@@ -291,6 +291,8 @@ async def revise(sentence: str, comment: str, reply: str) -> str | None:
         keeps_facts=(YesNo, Field(description="Does the rewrite keep every fact the sentence states? Adding what the comment asks for is fine.")),
         same_voice=(YesNo, Field(description="Does the rewrite still sound like the writer?")),
         only_text=(YesNo, Field(description="Is the rewrite only text the writer would send, with no advice, commentary or formatting marks in it?")),
+        keeps_meaning=(YesNo, Field(description="Does the rewrite keep the writer's meaning?")),
+        keeps_style=(YesNo, Field(description="Does the rewrite keep the writer's casing and style?")),
     )
     check = await run(ReviseCheck, f"Sentence: {sentence}\n\nRewrite: {replacement}")
     return replacement if replacement and min(check.values()) >= FIX_THRESHOLD else None

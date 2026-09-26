@@ -79,6 +79,11 @@ QUESTION_EXAMPLES = [
 mlx = httpx.AsyncClient(base_url=MLX_URL, timeout=30)
 
 
+def undash(text: str) -> str:
+    """`text` with each em dash turned into a comma; the 4B writes them despite the voice rule."""
+    return text.replace(" — ", ", ").replace("—", ", ")
+
+
 def messages(instructions: str, examples: list[tuple[str, str]], text: str) -> list[dict[str, str]]:
     return [
         {"role": "system", "content": instructions},
@@ -122,11 +127,11 @@ async def answers(sentence: str, paragraph: str, question: str, goal: str, count
     prompt = "".join(f"<|im_start|>{turn['role']}\n{turn['content']}<|im_end|>\n" for turn in turns) + "<|im_start|>assistant\n<think>\n\n</think>\n\n"
     response = await mlx.post("/completions", json={"model": MODEL, "prompt": prompt, "n": count, "max_tokens": 60, "temperature": 0.9})
     response.raise_for_status()
-    return [choice["text"].strip() for choice in response.json()["choices"]]
+    return [undash(choice["text"].strip()) for choice in response.json()["choices"]]
 
 
 async def revise(sentence: str, comment: str, reply: str) -> str:
-    return await chat(REVISE_INSTRUCTIONS, REVISE_EXAMPLES, f"Sentence: {sentence}\nComment: {comment}\nWriter's reply: {reply}", 2 * len(sentence.split()) + 40)
+    return undash(await chat(REVISE_INSTRUCTIONS, REVISE_EXAMPLES, f"Sentence: {sentence}\nComment: {comment}\nWriter's reply: {reply}", 2 * len(sentence.split()) + 40))
 
 
 async def extract_question(sentence: str) -> str:
