@@ -427,11 +427,14 @@ async def about_component(span: str, question: str, component: str, sentence: st
         __doc__=f"A writer pasted a reference to a part of their writing assistant's page into their draft. That part: {component}. They typed: '{span}'.",
         intent=(ComponentIntent, Field(description="yes_no: they ask a yes or no question about that part; question: they ask an open question about it; instruction: they ask to change, drop, forget or mark it done; mention: it is part of the text they are writing.")),
     )
-    intent, reply, probability = await asyncio.gather(run(Intent, f"Typed: {span}"), answer(sentence or paragraph, paragraph, f"{span} ({component})", goal, memory), probe(question, component))
-    return ComponentReply(intent["intent"], reply if intent["intent"] == "question" else None, probability if intent["intent"] == "yes_no" else None)
+    intent, reply, probed = await asyncio.gather(run(Intent, f"Typed: {span}"), answer(sentence or paragraph, paragraph, f"{span} ({component})", goal, memory), probe(question, component))
+    yes_no = intent["intent"] == "yes_no"
+    feed.act(intent, "applied", "intent")
+    feed.act(probed, "shown" if yes_no else "silent", "answer")
+    return ComponentReply(intent["intent"], reply if intent["intent"] == "question" else None, probed["answer"] if yes_no else None)
 
 
-async def probe(question: str, text: str) -> float:
-    """Jev's P(yes) on the writer's own yes/no `question` about `text`."""
+async def probe(question: str, text: str) -> dict[str, float | str]:
+    """Jev's answers with P(yes) on the writer's own yes/no `question` about `text` under "answer"."""
     Probe = create_model("Probe", __doc__=f"A writer asks a yes or no question about a part of their draft: {text}", answer=(YesNo, Field(description=question)))
-    return (await run(Probe, f"Text: {text}\n\nQuestion: {question}"))["answer"]
+    return await run(Probe, f"Text: {text}\n\nQuestion: {question}")

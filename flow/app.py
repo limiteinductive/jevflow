@@ -134,7 +134,9 @@ class Probe(BaseModel):
 
 @app.post("/probe")
 async def probe(probe: Probe) -> dict:
-    return {"probability": await decide.probe(probe.question, probe.text)}
+    answers = await decide.probe(probe.question, probe.text)
+    feed.act(answers, "shown", "answer")
+    return {"probability": answers["answer"]}
 
 
 @app.post("/fixes")
