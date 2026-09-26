@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import Field, create_model
 
-from flow import decide, feed, generator, reactions
+from flow import feed, generator, jev, reactions
 from text_processing import Sentence
 
 if TYPE_CHECKING:
@@ -48,7 +48,7 @@ sentence_claims: dict[tuple[str, str], tuple[float, asyncio.Task[Correction | No
 def fields(goal: str) -> dict:
     """The claim questions, as pydantic fields to add to the note gate."""
     return {
-        "claim": (Literal["yes", "no"], Field(description="Does the sentence state a checkable fact about the world?")),
+        "claim": (Literal["yes", "no"], Field(description="Does the sentence state a fact about the world that a knowledgeable stranger could check without knowing the writer?")),
         "true": (Literal["yes", "no"], Field(description="Is what the sentence states about the world true?")),
     }
 
@@ -73,10 +73,10 @@ async def correct(sentence: str) -> Correction | None:
             for name, template in ((f"true_{index}", "Is what '{draft}' states about the world true?"), (f"minimal_{index}", "Does '{draft}' keep the writer's sentence, changing only facts that were wrong?"))
         },
     )
-    check = await decide.run(CorrectionCheck, f"Sentence: {sentence}")
+    check = await jev.run(CorrectionCheck, f"Sentence: {sentence}")
     _, index = max((check[f"true_{index}"] * check[f"minimal_{index}"], index) for index in range(len(drafts)))
     accepted = min(check[f"true_{index}"], check[f"minimal_{index}"]) >= SWAP_THRESHOLD
-    feed.act(check, "shown" if accepted else "dropped", f"true_{index}", f"minimal_{index}")
+    feed.act(check, "shown" if accepted else "dropped", f"true_{index}", f"minimal_{index}", component="claims")
     return Correction(drafts[index], check[f"true_{index}"]) if accepted else None
 
 

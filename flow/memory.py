@@ -14,7 +14,7 @@ from pathlib import Path
 from fastapi import APIRouter
 from pydantic import BaseModel, Field, create_model
 
-from flow import decide, feed, generator
+from flow import feed, generator, jev
 
 ROOT = Path.home() / ".jevflow" / "memory"
 PROFILE = "profile"
@@ -23,6 +23,8 @@ KEEP_THRESHOLD = 0.7
 RELEVANT_THRESHOLD = 0.5
 MAX_RECALLED = 4
 MAX_DRAFT_CHARS = 600
+REF_TOKEN = re.compile(r"(?<![\w.])@(?:\"[^\"\n]*\"|[\w-]+)")
+"""A sentence holding a component token is the page's refs flow to read, so memory neither stores nor forgets from it."""
 FACT_INSTRUCTIONS = (
     "The user message is a sentence a writer typed; it holds a lasting fact or preference about the writer. Reply with three lines. "
     "Line 1: where it goes: profile (the writer's life and work), preferences (how they like their writing), or people/<first name in lowercase> (someone in their life). "
@@ -69,8 +71,8 @@ class Recall:
     """Jev's P(the fact is relevant to the draft): the higher of "about what the draft is about" and "followed in this draft"."""
 
 
-class Draft(BaseModel):
-    text: str
+class Forget(BaseModel):
+    sentence: str
 
 
 class Candidate(BaseModel):
@@ -97,8 +99,6 @@ class Undo(BaseModel):
 router = APIRouter()
 recalled: list[Recall] = []
 """The facts Jev ranked relevant at the last pause, most relevant first; they feed the coworker's prompts."""
-seen: set[str] = set()
-"""Sentences already asked the pause questions, so each is decided once."""
 writes = asyncio.Lock()
 tasks: set[asyncio.Task] = set()
 
@@ -181,12 +181,12 @@ async def store(file: str, keywords: list[str], fact: str, gates: dict[str, str]
     async with writes:
         aliases, lines = read(file)
         stored = [stored_fact.text for stored_file in files() for stored_fact in facts(stored_file)]
-        fields = {name: (decide.YesNo, Field(description=question)) for name, question in gates.items()}
+        fields = {name: (jev.YesNo, Field(description=question)) for name, question in gates.items()}
         for index, line in enumerate(stored):
-            fields[f"same_{index}"] = (decide.YesNo, Field(description=f"Does the stored fact '{line}' already say that {fact}?"))
+            fields[f"same_{index}"] = (jev.YesNo, Field(description=f"Does the stored fact '{line}' already say that {fact}?"))
         for index, line in enumerate(lines):
-            fields[f"contradicts_{index}"] = (decide.YesNo, Field(description=f"Does the new fact '{fact}' contradict the stored fact '{line}'?"))
-        check = await decide.run(create_model("Store", __doc__="jevflow keeps dated facts about the writer it works with.", **fields), f"New fact: {fact}")
+            fields[f"contradicts_{index}"] = (jev.YesNo, Field(description=f"Does the new fact '{fact}' contradict the stored fact '{line}'?"))
+        check = await jev.run(create_model("Store", __doc__="jevflow keeps dated facts about the writer it works with.", **fields), f"New fact: {fact}")
         failed = [name for name in gates if check[name] < KEEP_THRESHOLD]
         duplicates = [f"same_{index}" for index in range(len(stored)) if check[f"same_{index}"] >= KEEP_THRESHOLD]
         if failed or duplicates:
@@ -212,23 +212,30 @@ async def remember(sentence: str) -> None:
 
 
 async def forget(sentence: str) -> None:
-    """Removes every stored fact Jev reads as what `sentence` asks to forget, leaving a dated correction line in its file."""
+    """Removes every stored fact Jev reads as what `sentence` asks to forget; the dated commit is the correction, and only git history keeps the fact."""
     stored = [fact for file in files() for fact in facts(file)]
     if not stored:
         return
-    fields = {f"match_{index}": (decide.YesNo, Field(description=f"Is '{fact.text}' what the writer asks to forget?")) for index, fact in enumerate(stored)}
-    check = await decide.run(create_model("Forget", __doc__=f"The writer typed: '{sentence}'.", **fields), f"Typed: {sentence}")
+    fields = {f"match_{index}": (jev.YesNo, Field(description=f"Does the writer ask jevflow to forget that {fact.words}?")) for index, fact in enumerate(stored)}
+    check = await jev.run(create_model("Forget", __doc__=f"The writer typed: '{sentence}'.", **fields), f"Typed: {sentence}")
     matches = [name for name in fields if check[name] >= KEEP_THRESHOLD]
     feed.act(check, "applied" if matches else "dropped", *(matches or fields), component="memory")
     async with writes:
         for file in dict.fromkeys(fact.file for index, fact in enumerate(stored) if check[f"match_{index}"] >= KEEP_THRESHOLD):
             aliases, lines = read(file)
             gone = {fact.text for index, fact in enumerate(stored) if fact.file == file and check[f"match_{index}"] >= KEEP_THRESHOLD}
-            write(file, aliases, [line for line in lines if line not in gone] + [f"you asked me to forget this ('{sentence}'); corrected on {date.today()}."], f"Forget: {sentence}")
+            write(file, aliases, [line for line in lines if line not in gone], f"Forget on {date.today()}: {len(gone)} fact(s) the writer asked to forget")
 
 
 @router.get("/memory")
 async def show() -> dict:
+    return state()
+
+
+@router.post("/memory/forget")
+async def forget_ref(request: Forget) -> dict:
+    """A forget typed about a clicked fact, with its token replaced by the fact's words; `forget` gates and writes it."""
+    await forget(request.sentence)
     return state()
 
 
@@ -239,49 +246,54 @@ async def search_pages(search: PageSearch) -> dict:
         return {}
     asks = "Is the page '{title}' the one the writer asks for in '{question}'?" if search.open else "Does the writer's page '{title}', with the line '{line}', answer '{question}'?"
     fields = {
-        f"answers_{index}": (decide.YesNo, Field(description=asks.format(title=candidate.title, line=candidate.line, question=search.question)))
+        f"answers_{index}": (jev.YesNo, Field(description=asks.format(title=candidate.title, line=candidate.line, question=search.question)))
         for index, candidate in enumerate(search.candidates)
     }
-    check = await decide.run(create_model("PageSearch", __doc__="A writer asks jevflow about their other pages.", **fields), f"Question: {search.question}")
+    check = await jev.run(create_model("PageSearch", __doc__="A writer asks jevflow about their other pages.", **fields), f"Question: {search.question}")
     best = max(range(len(search.candidates)), key=lambda index: check[f"answers_{index}"])
     probability = check[f"answers_{best}"]
     feed.act(check, "shown" if probability >= RELEVANT_THRESHOLD else "dropped", f"answers_{best}", component="memory")
     return search.candidates[best].model_dump() | {"probability": probability} if probability >= RELEVANT_THRESHOLD else {}
 
 
-@router.post("/memory/pause")
-async def pause(draft: Draft) -> dict:
-    """One Jev payload per pause: "a note?", "still true next week?" and "an instruction to forget?" on each new sentence, "about someone or something this draft is about?" and "followed in this draft?" on each alias-matched fact.
+def fields(sentence: str) -> dict:
+    """Memory's questions about one sentence, as pydantic fields for the note gate: "a note?", "still true next week?" and "an instruction to forget?"."""
+    return {
+        "memory_note": (jev.YesNo, Field(description="Is the sentence a note to the assistant, rather than a line of the text the writer is writing?")),
+        "memory_lasting": (jev.YesNo, Field(description="Does the sentence say something about the writer or the people in their life that would still be true next week?")),
+        "memory_forget": (jev.YesNo, Field(description="Is the sentence an instruction to forget?")),
+    }
 
-    Writes run after the response; the reply lists the sentences Jev read as forget requests, for the page to lift out of the text.
-    """
-    global recalled
-    fresh = list(dict.fromkeys(sentence.text for sentence in decide.line_sentences(draft.text, []) if sentence.text not in seen))
-    found = candidates(draft.text)
-    fields = {}
-    for index, sentence in enumerate(fresh):
-        fields[f"note_{index}"] = (decide.YesNo, Field(description=f"Is '{sentence}' a note to the assistant, rather than a line of the text the writer is writing?"))
-        fields[f"lasting_{index}"] = (decide.YesNo, Field(description=f"Does '{sentence}' say something about the writer or the people in their life that would still be true next week?"))
-        fields[f"forget_{index}"] = (decide.YesNo, Field(description=f"Is '{sentence}' an instruction to forget?"))
-    for index, fact in enumerate(found):
-        fields[f"relevant_{index}"] = (decide.YesNo, Field(description=f"Is the memory '{fact.text}' about someone or something this draft is about?"))
-        fields[f"applies_{index}"] = (decide.YesNo, Field(description=f"Would the writer want the preference or fact '{fact.text}' followed in this draft?"))
-    if not fields:
-        return state() | {"forgets": []}
-    check = await decide.run(create_model("Pause", __doc__=decide.NOTE_CONTEXT, **fields), f"Draft: {draft.text[-MAX_DRAFT_CHARS:]}")
-    seen.update(fresh)
-    ranked = sorted((Recall(fact, max(check[f"relevant_{index}"], check[f"applies_{index}"])) for index, fact in enumerate(found)), key=lambda recall: recall.probability, reverse=True)
-    recalled = [recall for recall in ranked if recall.probability >= RELEVANT_THRESHOLD][:MAX_RECALLED]
-    forgets = [sentence for index, sentence in enumerate(fresh) if check[f"forget_{index}"] >= KEEP_THRESHOLD]
-    for sentence in forgets:
+
+def record(sentence: str, gate: dict[str, float | str]) -> bool:
+    """Spawns the write the note gate's memory answers call for; True when `sentence` asks to forget, so the gate files it as a note to lift out."""
+    if REF_TOKEN.search(sentence):
+        return False
+    if gate["memory_forget"] >= KEEP_THRESHOLD:
         spawn(forget(sentence))
-    lasting = [index for index, sentence in enumerate(fresh) if min(check[f"note_{index}"], check[f"lasting_{index}"]) >= KEEP_THRESHOLD and sentence not in forgets]
-    for index in lasting:
-        spawn(remember(fresh[index]))
-    shown = [f"{kind}_{index}" for index, fact in enumerate(found) if any(recall.fact == fact for recall in recalled) for kind in ("relevant", "applies")]
-    written = [f"forget_{index}" for index, sentence in enumerate(fresh) if sentence in forgets] + [f"{kind}_{index}" for index in lasting for kind in ("note", "lasting")]
-    feed.act(check, "applied" if written else "shown" if shown else "silent", *(written or shown), component="memory")
-    return state() | {"forgets": forgets}
+        return True
+    if min(gate["memory_note"], gate["memory_lasting"]) >= KEEP_THRESHOLD:
+        feed.act(gate, "applied", "memory_note", "memory_lasting", component="memory")
+        spawn(remember(sentence))
+    return False
+
+
+def recall_fields(found: list[Fact], goal: str) -> dict:
+    """Memory's questions about the draft, one pair per alias-matched fact in `found`, as pydantic fields for the pause's timing request."""
+    draft = f"this draft ({goal})" if goal else "this draft"
+    fields = {}
+    for index, fact in enumerate(found):
+        fields[f"relevant_{index}"] = (jev.YesNo, Field(description=f"Is the memory '{fact.text}' about someone or something {draft} is about?"))
+        fields[f"applies_{index}"] = (jev.YesNo, Field(description=f"Would the writer want the preference or fact '{fact.text}' followed in {draft}?"))
+    return fields
+
+
+def recall(found: list[Fact], answers: dict[str, float | str]) -> None:
+    """Keeps the facts in `found` that Jev ranks relevant to the draft, most relevant first, for the prompts and the page."""
+    global recalled
+    ranked = sorted((Recall(fact, max(answers[f"relevant_{index}"], answers[f"applies_{index}"])) for index, fact in enumerate(found)), key=lambda recall: recall.probability, reverse=True)
+    recalled = [recall for recall in ranked if recall.probability >= RELEVANT_THRESHOLD][:MAX_RECALLED]
+    feed.act(answers, "shown", *(f"{kind}_{index}" for index, fact in enumerate(found) if any(recall.fact is fact for recall in recalled) for kind in ("relevant", "applies")), component="memory")
 
 
 @router.post("/memory/undo")

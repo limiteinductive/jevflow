@@ -118,13 +118,15 @@ async def log_decisions(request: Request, call_next):
 @app.post("/notes")
 async def notes(draft: CommentedDraft) -> dict:
     enabled = frozenset(components.COMPONENTS) - frozenset(draft.disabled)
-    found, timing = await asyncio.gather(decide.find_notes(draft.text, draft.comment, draft.breaks, draft.goal, enabled), decide.timing(draft.text))
+    found, timing = await asyncio.gather(decide.find_notes(draft.text, draft.comment, draft.breaks, draft.goal, enabled), decide.timing(draft.text, draft.goal, enabled))
     sentences = decide.line_sentences(draft.text, draft.breaks)
     return {
         "notes": [asdict(note) for note in found],
         "timing": asdict(timing),
         "reactions": [asdict(reaction) for reaction in reactions.find(sentences, draft.goal, found)] if "reactions" in enabled else [],
+        "mash": [asdict(mash) for mash in await reactions.find_mash(sentences, draft.goal)] if "reactions" in enabled else [],
         "toggles": [asdict(toggle) for toggle in components.find(sentences)],
+        "memory": memory.state(),
         "meta": [{"start": sentence.start, "end": sentence.start + len(sentence.text), "text": sentence.text} for sentence in decide.meta_spans(sentences)],
         "claims": [asdict(claim) for claim in claims.find(sentences, draft.goal, found)] if "claims" in enabled else [],
     }
@@ -136,6 +138,18 @@ async def answer(question: Question) -> dict:
     return asdict(await decide.answer(question.sentence, question.paragraph, question.question, question.goal, memory.context(), components.context(enabled)))
 
 
+class Flagged(BaseModel):
+    sentence: str
+    pattern: str
+    """The insight's strongest reason, such as "'not just X, but Y' pattern"."""
+
+
+@app.post("/rewrite")
+async def rewrite(flagged: Flagged) -> dict:
+    found = await decide.rewrite(flagged.sentence, flagged.pattern)
+    return {"rewrite": asdict(found) if found else None}
+
+
 @app.post("/revise")
 async def revise(reply: Reply) -> dict:
     return {"replacement": await decide.revise(reply.sentence, reply.comment, reply.reply, reply.proposed, memory.context())}
@@ -144,6 +158,17 @@ async def revise(reply: Reply) -> dict:
 @app.post("/component")
 async def component(note: ComponentNote) -> dict:
     return asdict(await decide.about_component(note.span, note.question, note.component, note.text, note.sentence, note.paragraph, note.goal, memory.context()))
+
+
+class HeaderChange(BaseModel):
+    field: str
+    entries: list[str]
+    comment: str
+
+
+@app.post("/headers/change")
+async def headers_change(change: HeaderChange) -> dict:
+    return {"entries": await decide.edit_header(change.field, change.entries, change.comment)}
 
 
 class Probe(BaseModel):

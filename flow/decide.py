@@ -4,18 +4,18 @@ Every decision is one Jev request with all its questions in one payload.
 """
 
 import asyncio
+import re
 import math
-from itertools import pairwise
 from dataclasses import dataclass, replace
+from itertools import pairwise
 from typing import Literal
 
-from pydantic import BaseModel, Field, create_model
-from pydantic_ai import Agent
+from pydantic import Field, create_model
 
-from flow import claims, components, feed, generator, reactions
+from flow import claims, components, feed, generator, memory, reactions
+from flow.jev import YesNo, run
 from text_processing import Sentence, split_sentences
 
-MODEL = "typesafe:jev-latest"
 MAX_NOTE_WORDS = 12
 NOTE_THRESHOLD = 0.6
 NOTE_GATE = 0.55
@@ -38,6 +38,8 @@ DRAFT_CHECKS = {
     "casual": "Does the reply '{draft}' sound like a casual text from a friend?",
 }
 """Jev's questions on each drafted reply, all drafts in one payload; a draft ranks by the product of its answers."""
+ON_PURPOSE_CHECK = "Does '{draft}' call a word or spelling the writer chose on purpose, for voice or a joke (like 'akshually' or 'gonna'), a mistake, or offer to fix it?"
+"""Asked of each draft beside `DRAFT_CHECKS`; a draft at or above `NOTE_GATE` ranks below every other, so the reply never offers a fix the rewrite gate's on_purpose check would refuse."""
 ANSWER_FLOOR = 0.3
 """Below this on "answers the writer's question?" for every draft, the drafts are resampled once."""
 FIX_THRESHOLD = 0.7
@@ -46,21 +48,30 @@ HURTS_THRESHOLD = 0.7
 """A sentence gets a goal suggestion when Jev's P(it makes the text less of a Goal category) reaches this."""
 OPTION_INSTRUCTIONS = "A writer asks an open question about a part of their draft. Reply with 2 to 4 short possible answers, one per line, each 1 to 4 plain words. Reply with the list only."
 OPTION_EXAMPLES = [("Text: the launch slipped again, as expected\nQuestion: how does this come across?", "neutral\nfrustrated\npassive-aggressive")]
+HEADER_EDIT_INSTRUCTIONS = (
+    "A writer's draft has a header field with entries, one per line. Rewrite the entries as the writer's comment asks, changing only what it asks for, and drop an entry the comment asks to drop. "
+    "One entry per line, as short as the originals. Reply with the list only."
+)
+HEADER_EDIT_EXAMPLES = [
+    ("Field: Goal\nEntries:\nx post\n50% objective\n\nComment: drop the 50% part", "x post"),
+    ("Field: Goal\nEntries:\nx post\n\nComment: make it a linkedin post", "linkedin post"),
+]
+HEADER_EDIT_THRESHOLD = 0.6
+"""An edited header list replaces the old one only when both of Jev's checks reach this."""
 MAX_OPTIONS = 4
+PERCENT = re.compile(r"(\d{1,3})\s*%")
 OPTION_FIT = 0.5
 """The options are shown only when Jev's P(one of them answers the question) reaches this; otherwise the question gets a one-line reply."""
 NOTE_CONTEXT = "A writer types their text and, in the same stream, notes to a writing assistant such as 'make this punchier', 'this is for engineers', 'im writing a blog post', 'replying to my boss about friday' or 'undo'."
 
-YesNo = Literal["yes", "no"]
-
-NoteField = Literal["new_page", "goal", "audience", "tone", "to_do", "undo", "question", "reply", "find", "open"]
-"""Header fields, plus "undo" (reverts the last edit), "question" (opens a comment thread on the previous sentence), "reply" (answers the open comment), and "find" and "open" (search the writer's other pages, and switch to the page found)."""
+NoteField = Literal["new_page", "goal", "audience", "tone", "to_do", "undo", "question", "reply", "find", "open", "forget"]
+"""Header fields, plus "undo" (reverts the last edit), "question" (opens a comment thread on the previous sentence), "reply" (answers the open comment), "find" and "open" (search the writer's other pages, and switch to the page found), and "forget" (asks memory to forget a fact)."""
 
 Scope = Literal["sentence", "paragraph"]
 
 QuestionKind = Literal["understand", "opinion", "cut_or_keep", "true", "wording", "other"]
 
-ComponentIntent = Literal["yes_no", "question", "instruction", "turn_off", "turn_on", "change", "mention"]
+ComponentIntent = Literal["yes_no", "question", "reply", "set_target", "instruction", "turn_off", "turn_on", "change", "mention"]
 
 HeaderField = Literal["goal", "audience", "tone", "to_do", "undo"]
 
@@ -108,6 +119,14 @@ class Measure:
 
 
 @dataclass(frozen=True)
+class Rewrite:
+    text: str
+    keeps_meaning: float
+    uses_pattern: float
+    """P(the rewrite still reads as the flagged pattern)."""
+
+
+@dataclass(frozen=True)
 class Answer:
     text: str
     """The coworker's words, written by the local model."""
@@ -128,6 +147,8 @@ class ComponentReply:
     """The local model's short answers to an open question about a copied span, when Jev says one of them fits."""
     pick: str | None
     """The option Jev chose."""
+    target: float | None
+    """The target the writer set, as a fraction, when they set one on a gauge."""
 
 
 @dataclass(frozen=True)
@@ -141,7 +162,7 @@ class Timing:
 class GoalSuggestion:
     replacement: str
     comment: str
-    """Why the sentence should change, such as "For a LinkedIn post, this sentence works against 'concrete'."."""
+    """Why the sentence should change, such as "heads up: for a LinkedIn post, this one works against 'concrete'."."""
     measures: list[Measure]
 
 
@@ -154,9 +175,6 @@ class Suggestion:
     comment: str
     measures: list[Measure]
 
-
-agent = Agent(MODEL)
-"""One agent for every decision: a fresh agent per call opens a new connection and adds about 0.4 s."""
 
 sentence_notes: dict[tuple[str, str, str, frozenset[str]], SentenceNote | None] = {}
 """Decisions by sentence text; the page asks about the whole draft on every pause, so each sentence is decided once."""
@@ -178,22 +196,19 @@ def line_sentences(text: str, breaks: list[int]) -> list[Sentence]:
     ]
 
 
-async def run(output_type: type[BaseModel], prompt: str) -> dict[str, float | str]:
-    """P(yes) for every yes/no field, and the chosen option for every other field; `feed.act` marks what the page does with them."""
-    _, answers = await feed.ask(agent, prompt, output_type)
-    return answers
-
-
 async def decide_note(sentence: str, comment: str, goal: str, enabled: frozenset[str]) -> SentenceNote | None:
     """Jev gates the sentence while the LLM copies out the note words and writes the header (the local model is free, so it runs on every sentence); Jev then checks both.
 
     When the copied words fail the check, the sentence is a note only if Jev reads all of it as one; a header that fails is replaced by the note words.
-    With a `goal`, a sentence Jev reads as starting something other than it is a `new_page` note: the whole sentence leaves, and its header is the new page's Goal.
+    A sentence Jev reads as asking for a new page, or with a `goal` as starting something other than it, is a `new_page` note: the whole sentence leaves, and its header, when it names the new piece, is the new page's Goal.
     A sentence that asks to turn a component on or off is recorded by `components` and is no note; reaction questions ride only when reactions are `enabled`.
     A goal or `new_page` note that Jev reads as also naming who the text is for files the audience the local model copied as a second header.
     """
     reply = {"reply": (YesNo, Field(description="Is the writer answering the coworker's comment (agreeing, disagreeing, correcting it or asking for the change) rather than writing the text?"))} if comment else {}
-    new_piece = {"new_piece": (YesNo, Field(description=f"Does the writer say they are now writing something other than the {goal}?"))} if goal and "pages" in enabled else {}
+    new_piece = {
+        "new_piece": (YesNo, Field(description="Does the writer ask for a new page" + (f", or say they are now writing something other than the {goal}" if goal else "") + "?")),
+        "names_piece": (YesNo, Field(description="Does the sentence say what the writer will write next?")),
+    } if "pages" in enabled else {}
     NoteGate = create_model(
         "NoteGate",
         __doc__=NOTE_CONTEXT + " The writer keeps several pages, one per piece of writing." + (f" The writer's coworker just commented on the draft: '{comment}'" if comment else ""),
@@ -209,6 +224,7 @@ async def decide_note(sentence: str, comment: str, goal: str, enabled: frozenset
         **new_piece,
         **components.fields(),
         **(reactions.fields(goal) if "reactions" in enabled else {}),
+        **(memory.fields(sentence) if "memory" in enabled else {}),
         **(claims.fields(goal) if "claims" in enabled else {}),
     )
     gate, (note, header), question, audience = await asyncio.gather(
@@ -221,16 +237,19 @@ async def decide_note(sentence: str, comment: str, goal: str, enabled: frozenset
         claims.record(sentence, goal, gate)
     if components.record(sentence, gate):
         return None
+    if "memory" in enabled and memory.record(sentence, gate):
+        feed.act(gate, "applied", "memory_forget", component="memory")
+        return SentenceNote(sentence, gate["memory_forget"], "forget", [])
     if gate.get("reply", 0) >= NOTE_GATE:
         feed.act(gate, "applied", "reply", component="replies")
         return SentenceNote(sentence, gate["reply"], "reply", [])
+    new_page = gate.get("new_piece", 0)
     searches = max(gate["find_page"], gate["open_page"])
-    if searches >= NOTE_GATE:
+    if searches >= NOTE_GATE and new_page < NOTE_GATE:
         feed.act(gate, "applied", "find_page", "open_page", component="pages")
         return SentenceNote(sentence, searches, "open" if gate["open_page"] >= gate["find_page"] else "find", [])
     asks = min(gate["asks"], gate["is_question"])
-    new_page = gate.get("new_piece", 0)
-    field = "question" if asks >= NOTE_GATE else "new_page" if new_page >= NOTE_GATE else gate["field"]
+    field = "new_page" if new_page >= NOTE_GATE else "question" if asks >= NOTE_GATE else gate["field"]
     probability = max(gate["plan"], asks, new_page)
     if probability < NOTE_GATE:
         feed.act(gate, "silent", "plan", "asks", component="notes")
@@ -263,9 +282,15 @@ async def decide_note(sentence: str, comment: str, goal: str, enabled: frozenset
         feed.act(header_check, "applied" if fair else "dropped", *decisive, component="notes")
         return [Header(field, header if fair else fallback)] + ([Header("audience", audience)] if names_audience and header_check["audience"] >= NOTE_THRESHOLD else [])
 
+    if field == "new_page" and gate["names_piece"] < NOTE_GATE:
+        return SentenceNote(sentence, probability, field, [])
     if field == "new_page":
         header_check = await run(HeaderCheck, f"Note: {note}\n\nHeader: {header}")
-        return SentenceNote(sentence, probability, field, headers("goal", sentence))
+        seeded = headers("goal", sentence)
+        print(f"new_page: {sentence!r} P={probability:.2f} goal={goal!r} seeds={[header.text for header in seeded]}", flush=True)
+        if any(header.field == "goal" and header.text.strip().lower() == goal.strip().lower() for header in seeded):
+            return None
+        return SentenceNote(sentence, probability, field, seeded)
     check, header_check = await asyncio.gather(run(NoteCheck, f"Sentence: {sentence}"), run(HeaderCheck, f"Note: {note}\n\nHeader: {header}"))
     if note not in sentence or min(check["only_note"], check["whole_note"]) < NOTE_THRESHOLD:
         if check["sentence_only_note"] < NOTE_THRESHOLD:
@@ -299,15 +324,21 @@ async def question_span(sentence: str, question: str) -> str | None:
     return span if span == sentence or check["whole_question"] >= NOTE_THRESHOLD else sentence
 
 
-async def timing(text: str) -> Timing:
-    """Whether now is a moment to show the writer anything unasked: every comment, popup and fix waits for it (the page's shortcut until a single per-pause decision motor exists)."""
+async def timing(text: str, goal: str, enabled: frozenset[str]) -> Timing:
+    """Whether now is a moment to show the writer anything unasked: every comment, popup and fix waits for it (the page's shortcut until a single per-pause decision motor exists).
+
+    Memory's recall questions for the facts whose aliases the draft or its `goal` mention ride in the same request.
+    """
+    found = memory.candidates(f"{goal}\n{text}") if "memory" in enabled else []
     Moment = create_model(
         "Moment",
         __doc__=f"A writer is typing a draft; the end of it so far is: '{text[-TIMING_CONTEXT_CHARS:]}'.",
         mid_thought=(YesNo, Field(description="Is the writer in the middle of a thought, likely to keep typing the same idea right now?")),
         interrupt=(YesNo, Field(description="Would a suggestion about what they already wrote be welcome now, rather than breaking their flow?")),
+        **memory.recall_fields(found, goal),
     )
     moment = await run(Moment, f"Draft end: {text[-TIMING_CONTEXT_CHARS:]}")
+    memory.recall(found, moment)
     feed.act(moment, "applied" if moment["mid_thought"] < MID_THOUGHT_GATE and moment["interrupt"] >= INTERRUPT_GATE else "silent", "mid_thought", "interrupt", component=None)
     return Timing(moment["mid_thought"], moment["interrupt"])
 
@@ -369,7 +400,7 @@ async def decide_fix(sentence: str, draft: str, goal: str, categories: list[str]
         feed.act(check, "dropped" if corrects else "silent", *check, component="corrections")
         return None, None
     against = " and ".join(f"'{category}'" for _, category in hurt)
-    comment = f"For {goal}, this sentence works against {against}."
+    comment = f"heads up: for {goal}, this one works against {against}."
     rewrite = await revise(sentence, comment, "ok", "", "")
     if rewrite is None or rewrite == sentence:
         feed.act(check, "dropped", *hurts, component="corrections")
@@ -402,7 +433,7 @@ async def find_fixes(text: str, limit: int, goal: str, categories: list[str]) ->
 async def answer(sentence: str, paragraph: str, question: str, goal: str, memory: str, features: str) -> Answer:
     """The coworker's reply to the writer's `question` about `sentence`: the local model drafts `NUM_DRAFTS` in one batch, Jev ranks them on `DRAFT_CHECKS`.
 
-    The top-ranked draft is shown unless every draft fails "answers the question"; then the drafts are resampled once.
+    Drafts that offer to fix an on-purpose word rank last, then drafts that fail `ANSWER_FLOOR` on "answers the question"; when every draft fails it the drafts are resampled once, and the text is empty when they fail again.
     Jev also names the kind of question; when it asks whether readers will understand, P(a reader gets it) leads the measures.
     When Jev says the question is about jevflow itself, the drafts are redone with `features`, the components' on/off state.
     """
@@ -413,27 +444,35 @@ async def answer(sentence: str, paragraph: str, question: str, goal: str, memory
         scope=(Scope, Field(description="Is the question about the last sentence, or about the whole paragraph (its length, pace or structure)?")),
         kind=(QuestionKind, Field(description="What is the writer asking? understand: will readers get it; opinion: what do you think; cut_or_keep: should it stay; true: is it accurate; wording: is there a better way to say it; other.")),
         reader_gets=(YesNo, Field(description=f"Would {reader} get what the sentence means?")),
-        about_assistant=(YesNo, Field(description="Is the writer asking the writing assistant about itself (what it can do, what it is doing, why it did something)?")),
+        about_assistant=(YesNo, Field(description="Is the question about the writing assistant itself, such as what it can do, rather than a request about the draft?")),
     )
     meta_task = asyncio.create_task(run(Meta, f"Paragraph: {paragraph}\n\nLast sentence: {sentence}\n\nQuestion: {question}"))
-    context, retries = memory, 1
+    shown_features, retries = "", 1
     while True:
-        drafts = list(dict.fromkeys(await generator.answers(sentence, paragraph, question, goal, NUM_DRAFTS, context)))
+        drafts = list(dict.fromkeys(await generator.answers(sentence, paragraph, question, goal, NUM_DRAFTS, memory, shown_features)))
         fields = {
             f"{name}_{index}": (YesNo, Field(description=template.format(draft=draft)))
             for index, draft in enumerate(drafts)
             for name, template in DRAFT_CHECKS.items()
-        }
+        } | {f"on_purpose_{index}": (YesNo, Field(description=ON_PURPOSE_CHECK.format(draft=draft))) for index, draft in enumerate(drafts)}
         Pick = create_model("Pick", __doc__=f"A writer drafting a {goal or 'text'} asks a coworker about the sentence they just wrote; the coworker drafted replies.", **fields)
         check = await run(Pick, f"Paragraph: {paragraph}\n\nLast sentence: {sentence}\n\nQuestion: {question}")
-        ranked = sorted(((math.prod(check[f"{name}_{index}"] for name in DRAFT_CHECKS), check[f"answers_{index}"], draft) for index, draft in enumerate(drafts)), reverse=True)
+        on_purpose = {draft: check[f"on_purpose_{index}"] for index, draft in enumerate(drafts)}
+        ranked = sorted(
+            ((math.prod(check[f"{name}_{index}"] for name in DRAFT_CHECKS), check[f"answers_{index}"], draft) for index, draft in enumerate(drafts)),
+            key=lambda row: (on_purpose[row[2]] < NOTE_GATE, row[1] >= ANSWER_FLOOR, row[0]),
+            reverse=True,
+        )
         meta = await meta_task
-        if features and context == memory and meta["about_assistant"] >= NOTE_GATE:
-            context = memory + features
-        elif max(answers for _, answers, _ in ranked) >= ANSWER_FLOOR or not retries:
+        if features and not shown_features and meta["about_assistant"] >= NOTE_GATE:
+            shown_features = features
+        elif max(answers for _, answers, _ in ranked) >= ANSWER_FLOOR:
             break
-        else:
+        elif retries:
             retries -= 1
+        else:
+            feed.act(check, "dropped", *(f"answers_{index}" for index in range(len(drafts))), component="replies")
+            return Answer("", [], meta["scope"])
     feed.act(check, "shown", *(f"{name}_{drafts.index(ranked[0][2])}" for name in ("answers", "specific", "voice")), component="replies")
     feed.act(meta, "shown" if meta["kind"] == "understand" else "silent", "kind", "reader_gets", component="replies")
     measures = [Measure("answers", "Does the reply answer the writer's question?", ranked[0][1])]
@@ -471,23 +510,49 @@ async def revise(sentence: str, comment: str, reply: str, proposed: str, memory:
     return replacement if replacement and min(check.values()) >= FIX_THRESHOLD else None
 
 
+async def rewrite(sentence: str, pattern: str) -> Rewrite | None:
+    """The local model's best of `NUM_DRAFTS` rewrites of `sentence` without `pattern`, all scored in one Jev payload; None when none keeps the meaning and drops the pattern."""
+    drafts = list(dict.fromkeys(draft for draft in await generator.revisions(sentence, f"It reads as {pattern}. Say what it is as a plain statement, with no contrast against what it is not.", NUM_DRAFTS) if draft and draft != sentence))
+    if not drafts:
+        return None
+    fields = {}
+    for index, draft in enumerate(drafts):
+        fields[f"keeps_meaning_{index}"] = (YesNo, Field(description=f"Does '{draft}' keep the meaning of the sentence?"))
+        fields[f"uses_pattern_{index}"] = (YesNo, Field(description=f"Does '{draft}' still read as {pattern}?"))
+    check = await run(create_model("RewriteCheck", __doc__=f"A writer's sentence reads as {pattern}. Sentence: '{sentence}'. A coworker drafted rewrites.", **fields), f"Sentence: {sentence}")
+    passing = [
+        (check[f"keeps_meaning_{index}"] * (1 - check[f"uses_pattern_{index}"]), index)
+        for index in range(len(drafts))
+        if check[f"keeps_meaning_{index}"] >= FIX_THRESHOLD and 1 - check[f"uses_pattern_{index}"] >= FIX_THRESHOLD
+    ]
+    if not passing:
+        feed.act(check, "dropped", *check, component="flags")
+        return None
+    _, best = max(passing)
+    feed.act(check, "applied", f"keeps_meaning_{best}", f"uses_pattern_{best}", component="flags")
+    return Rewrite(drafts[best], check[f"keeps_meaning_{best}"], check[f"uses_pattern_{best}"])
+
+
 async def about_component(span: str, question: str, component: str, text: str, sentence: str, paragraph: str, goal: str, memory: str) -> ComponentReply:
     """What the writer meant by typing `span` with a pasted reference to a page component, and the coworker's answer when it is a question.
 
     `question` is `span` without the reference; `text` is the copied draft text when the reference is a span, else empty. Only a span gets the yes/no probe; a yes/no question
     about any other component gets the coworker's answer. The answer and the probe run while Jev decides the intent, so neither costs an extra round.
     """
+    numbers = list(dict.fromkeys(PERCENT.findall(question)))
     Intent = create_model(
         "Intent",
         __doc__=f"A writer pasted a reference to a part of their writing assistant's page into their draft. That part: {component}. They typed: '{span}'.",
         intent=(
             ComponentIntent,
             Field(
-                description="yes_no: they ask a yes or no question about that part; question: they ask an open question about it; instruction: they ask to drop, forget or mark done an item; "
+                description="yes_no: they ask a yes or no question about that part; question: they ask an open question about it; reply: they answer or reply to a comment in it; "
+                "set_target: they set a goal or target number for it; instruction: they ask to drop, forget or mark done an item; "
                 "turn_off: they ask to remove, hide or turn off the whole part; turn_on: they ask to bring it back or turn it on; change: they ask to change what it measures or how it works; "
                 "mention: it is part of the text they are writing."
             ),
         ),
+        **({"target": (Literal[tuple(numbers)], Field(description="Which number is the target they want to reach?"))} if len(numbers) > 1 else {}),
     )
     intent, reply, probed, picked = await asyncio.gather(
         run(Intent, f"Typed: {span}"),
@@ -500,9 +565,10 @@ async def about_component(span: str, question: str, component: str, text: str, s
     if probed is not None:
         feed.act(probed, "shown" if probing else "silent", "answer", component="probes")
     choosing = intent["intent"] == "question" and picked is not None
-    asks = intent["intent"] in ("question", "yes_no") and not probing and not choosing
+    asks = intent["intent"] in ("question", "yes_no", "reply", "set_target") and not probing and not choosing
     options, pick = picked if choosing else (None, None)
-    return ComponentReply(intent["intent"], reply if asks else None, probed["answer"] if probing else None, options, pick)
+    target = int(intent.get("target", numbers[0])) / 100 if intent["intent"] == "set_target" and numbers else None
+    return ComponentReply(intent["intent"], reply if asks else None, probed["answer"] if probing else None, options, pick, target)
 
 
 async def pick_option(question: str, text: str) -> tuple[list[str], str] | None:
@@ -527,3 +593,21 @@ async def probe(question: str, text: str) -> dict[str, float | str]:
     """Jev's answers with P(yes) on the writer's own yes/no `question` about `text` under "answer"."""
     Probe = create_model("Probe", __doc__=f"A writer asks a yes or no question about a part of their draft: {text}", answer=(YesNo, Field(description=question)))
     return await run(Probe, f"Text: {text}\n\nQuestion: {question}")
+
+
+async def edit_header(field: str, entries: list[str], comment: str) -> list[str] | None:
+    """`entries` of the header `field` rewritten as the writer's `comment` asks, when Jev says the rewrite does what it asks and keeps the rest; None otherwise."""
+    reply = await generator.chat(HEADER_EDIT_INSTRUCTIONS, HEADER_EDIT_EXAMPLES, f"Field: {field}\nEntries:\n" + "\n".join(entries) + f"\n\nComment: {comment}", 40)
+    proposed = list(dict.fromkeys(filter(None, (line.strip(" -*\u2022") for line in reply.splitlines()))))
+    if proposed == entries:
+        return None
+    HeaderEdit = create_model(
+        "HeaderEdit",
+        __doc__=f"A writer's draft has a {field} header: {'; '.join(entries)}. The writer commented: '{comment}'. The new {field}: {'; '.join(proposed) or '(empty)'}.",
+        follows=(YesNo, Field(description="Does the new header do what the writer's comment asks?")),
+        keeps=(YesNo, Field(description="Are the entries the comment is not about still there, unchanged? Answer yes when every entry is one the comment is about.")),
+    )
+    check = await run(HeaderEdit, f"Comment: {comment}\n\nOld: {'; '.join(entries)}\n\nNew: {'; '.join(proposed)}")
+    applied = min(check["follows"], check["keeps"]) >= HEADER_EDIT_THRESHOLD
+    feed.act(check, "applied" if applied else "dropped", "follows", "keeps", component="notes")
+    return proposed if applied else None
