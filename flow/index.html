@@ -36,7 +36,11 @@
   .card p:last-child { margin-bottom: 0; }
   .card b { font-weight: 600; margin-right: 0.35rem; }
   .card .coworker b { color: rgb(var(--thread)); }
-  .card .measure { display: inline-block; margin: 0 4px 4px 0; padding: 0 6px; border-radius: 4px; font-size: 11px; background: rgba(var(--thread), 0.12); color: rgb(var(--thread)); }
+  .card .rings { display: flex; gap: 2px; margin: 4px 0 6px; }
+  .gauge.mini { width: 58px; font-size: 10.5px; }
+  .gauge.mini svg { width: 34px; height: 34px; }
+  .gauge.mini .value { height: 34px; line-height: 34px; font-size: 10px; }
+  .gauge.mini .delta { display: none; }
   .card .status { color: var(--faint); font-size: 11.5px; }
   .ask {
     position: absolute; transform: translateY(-100%); font: 11.5px/1.25 -apple-system, "Helvetica Neue", sans-serif;
@@ -172,11 +176,20 @@ function renderThread(sheet) {
   const card = document.createElement("div");
   card.className = "card";
   const lines = [`<p><b>You</b>${escape(thread.question)}</p>`];
-  const measures = (thread.measures || []).map((measure) => `<span class="measure">${escape(measure.label)} ${Math.round(100 * measure.probability)}%</span>`).join("");
-  lines.push(`<p class="coworker"><b>jevflow</b>${thread.answer === undefined ? '<span class="status">thinking…</span>' : measures + escape(thread.answer)}</p>`);
+  lines.push(`<p class="coworker"><b>jevflow</b>${thread.answer === undefined ? '<span class="status">thinking…</span>' : `<span class="measures"></span>${escape(thread.answer)}`}</p>`);
   if (thread.reply) lines.push(`<p><b>You</b>${escape(thread.reply)}</p>`);
   if (thread.status) lines.push(`<p class="status">${escape(thread.status)}</p>`);
   card.innerHTML = lines.join("");
+  const slot = card.querySelector(".measures");
+  if (slot && thread.measures) {
+    if (!thread.rings) thread.rings = Object.assign(document.createElement("div"), { className: "rings" });
+    for (const measure of thread.measures) {
+      let ring = [...thread.rings.children].find((element) => element.dataset.name === measure.label);
+      if (!ring) { ring = createRing(measure.label); ring.classList.add("mini"); thread.rings.appendChild(ring); }
+      setRing(ring, measure.probability, measure.question);
+    }
+    slot.replaceWith(thread.rings);
+  }
   card.style.top = `${span.getClientRects()[0].top - sheet.top - 4}px`;
   commentsLayer.appendChild(card);
 }
@@ -397,6 +410,38 @@ function levelWord(probability) {
   return GAUGE_LEVELS.find(([ceiling]) => probability < ceiling)[1];
 }
 
+function createRing(name) {
+  const element = document.createElement("div");
+  element.className = "gauge entering";
+  element.dataset.name = name;
+  element.innerHTML = `<svg viewBox="0 0 52 52"><circle class="track" cx="26" cy="26" r="21" fill="none" stroke-width="5"/><circle class="level" cx="26" cy="26" r="21" fill="none" stroke-width="5" stroke-linecap="round" stroke-dasharray="${GAUGE_RING}" stroke-dashoffset="${GAUGE_RING}"/></svg><span class="value">0%</span><span class="delta"></span><span class="name">${escape(name)}</span><span class="tip"></span>`;
+  element.shown = 0;
+  element.target = null;
+  return element;
+}
+
+function setRing(element, probability, question) {
+  element.getBoundingClientRect();
+  element.classList.remove("entering");
+  const percent = Math.round(100 * probability);
+  element.querySelector(".tip").innerHTML = `<b>Jev</b> asked: “${escape(question)}”<br>P(yes) = ${percent}% · ${levelWord(probability)}`;
+  if (element.target === probability) return;
+  const change = element.target === null ? 0 : percent - Math.round(100 * element.target);
+  element.target = probability;
+  const ring = element.querySelector(".level");
+  ring.style.strokeDashoffset = `${GAUGE_RING * (1 - probability)}px`;
+  ring.style.stroke = gaugeColor(probability);
+  ring.style.color = gaugeColor(probability);
+  tweenValue(element, probability);
+  if (!change) return;
+  const delta = element.querySelector(".delta");
+  delta.textContent = change > 0 ? `▲ ${change}` : `▼ ${-change}`;
+  delta.className = `delta shown ${change > 0 ? "up" : "down"}`;
+  element.classList.add("pulse");
+  clearTimeout(element.deltaTimer);
+  element.deltaTimer = setTimeout(() => { delta.classList.remove("shown"); element.classList.remove("pulse"); }, DELTA_MS);
+}
+
 function renderGauges() {
   if (!currentGoal()) { gaugesBox.innerHTML = ""; return; }
   let meter = gaugesBox.querySelector(".jev-meter");
@@ -405,35 +450,10 @@ function renderGauges() {
   for (const gauge of gauges) {
     let element = gaugesBox.querySelector(`.gauge[data-name="${CSS.escape(gauge.name)}"]:not(.leaving)`);
     if (!element) {
-      element = document.createElement("div");
-      element.className = "gauge entering";
-      element.dataset.name = gauge.name;
-      element.innerHTML = `<svg viewBox="0 0 52 52"><circle class="track" cx="26" cy="26" r="21" fill="none" stroke-width="5"/><circle class="level" cx="26" cy="26" r="21" fill="none" stroke-width="5" stroke-linecap="round" stroke-dasharray="${GAUGE_RING}" stroke-dashoffset="${GAUGE_RING}"/></svg><span class="value">0%</span><span class="delta"></span><span class="name">${escape(gauge.name)}</span><span class="tip"></span>`;
-      element.shown = 0;
-      element.target = null;
+      element = createRing(gauge.name);
       gaugesBox.insertBefore(element, gaugesBox.querySelector(".count"));
-      element.getBoundingClientRect();
-      element.classList.remove("entering");
     }
-    const percent = Math.round(100 * gauge.probability);
-    element.querySelector(".tip").innerHTML = `<b>Jev</b> asked: “${escape(gauge.question)}”<br>P(yes) = ${percent}% · ${levelWord(gauge.probability)}`;
-    if (element.target === gauge.probability) continue;
-    const change = element.target === null ? 0 : percent - Math.round(100 * element.target);
-    element.target = gauge.probability;
-    const ring = element.querySelector(".level");
-    ring.getBoundingClientRect();
-    ring.style.strokeDashoffset = `${GAUGE_RING * (1 - gauge.probability)}px`;
-    ring.style.stroke = gaugeColor(gauge.probability);
-    ring.style.color = gaugeColor(gauge.probability);
-    tweenValue(element, gauge.probability);
-    if (change) {
-      const delta = element.querySelector(".delta");
-      delta.textContent = change > 0 ? `▲ ${change}` : `▼ ${-change}`;
-      delta.className = `delta shown ${change > 0 ? "up" : "down"}`;
-      element.classList.add("pulse");
-      clearTimeout(element.deltaTimer);
-      element.deltaTimer = setTimeout(() => { delta.classList.remove("shown"); element.classList.remove("pulse"); }, DELTA_MS);
-    }
+    setRing(element, gauge.probability, gauge.question);
   }
   for (const element of [...gaugesBox.querySelectorAll(".gauge:not(.leaving)")]) {
     if (gauges.some((gauge) => gauge.name === element.dataset.name)) continue;
