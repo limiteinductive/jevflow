@@ -87,7 +87,9 @@ class Fix:
 @dataclass(frozen=True)
 class Measure:
     label: str
-    """The question Jev answered, as a short phrase such as "readers get it"."""
+    """One word for the measure, such as "understood"."""
+    question: str
+    """The question Jev answered."""
     probability: float
 
 
@@ -355,9 +357,9 @@ async def answer(sentence: str, paragraph: str, question: str, goal: str) -> Ans
     meta = await meta_task
     feed.act(check, "shown", *(f"{name}_{drafts.index(ranked[0][2])}" for name in ("answers", "specific", "voice")))
     feed.act(meta, "shown" if meta["kind"] == "understand" else "silent", "kind", "reader_gets")
-    measures = [Measure("answers your question", ranked[0][1])]
+    measures = [Measure("answers", "Does the reply answer the writer's question?", ranked[0][1])]
     if meta["kind"] == "understand":
-        measures.insert(0, Measure("readers get it", meta["reader_gets"]))
+        measures.insert(0, Measure("understood", f"Would {reader} get what the sentence means?", meta["reader_gets"]))
     return Answer(ranked[0][2], measures, meta["scope"])
 
 

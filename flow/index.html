@@ -38,7 +38,11 @@
   .card p:last-child { margin-bottom: 0; }
   .card b { font-weight: 600; margin-right: 0.35rem; }
   .card .coworker b { color: rgb(var(--thread)); }
-  .card .measure { display: inline-block; margin: 0 4px 4px 0; padding: 0 6px; border-radius: 4px; font-size: 11px; background: rgba(var(--thread), 0.12); color: rgb(var(--thread)); }
+  .card .rings { display: flex; gap: 2px; margin: 4px 0 6px; }
+  .gauge.mini { width: 58px; font-size: 10.5px; }
+  .gauge.mini svg { width: 34px; height: 34px; }
+  .gauge.mini .value { height: 34px; line-height: 34px; font-size: 10px; }
+  .gauge.mini .delta { display: none; }
   .card .status { color: var(--faint); font-size: 11.5px; }
   .card.shake { animation: shake 0.4s; }
   @keyframes shake { 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
@@ -47,16 +51,26 @@
     background: var(--ask-bg); color: var(--ask-ink); padding: 1px 7px; border-radius: 5px; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis;
   }
   .ask small { opacity: 0.7; margin-left: 0.4rem; }
-  #gauges { display: flex; flex-wrap: wrap; gap: 14px; margin: -1.6rem 0 2.4rem; font: 11.5px/1.3 -apple-system, "Helvetica Neue", sans-serif; color: var(--faint); }
+  #gauges { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px 4px; margin: -1.4rem 0 2.2rem; padding: 10px 12px 8px; border: 1px solid var(--card-edge); border-radius: 12px; background: var(--card-bg); font: 11.5px/1.3 -apple-system, "Helvetica Neue", sans-serif; color: var(--faint); transition: opacity 0.5s; }
   #gauges:empty { display: none; }
-  .gauge { position: relative; width: 64px; text-align: center; }
-  .gauge svg { width: 44px; height: 44px; display: block; margin: 0 auto 2px; transform: rotate(-90deg); }
+  .gauge { position: relative; width: 74px; text-align: center; transition: opacity 0.5s, transform 0.5s; }
+  .gauge.entering, .gauge.leaving { opacity: 0; transform: scale(0.7); }
+  .gauge svg { width: 52px; height: 52px; display: block; margin: 0 auto 3px; transform: rotate(-90deg); overflow: visible; }
   .gauge .track { stroke: var(--card-edge); }
-  .gauge .level { transition: stroke-dashoffset 0.9s ease, stroke 0.9s ease; }
-  .gauge .value { position: absolute; top: 0; left: 0; right: 0; height: 44px; line-height: 44px; color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
-  .gauge .name { display: block; overflow-wrap: break-word; }
-  .gauge:hover::after { content: attr(data-level); position: absolute; top: -20px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--paper); padding: 1px 6px; border-radius: 4px; white-space: nowrap; }
-  .count { align-self: center; font-variant-numeric: tabular-nums; color: var(--ink); }
+  .gauge .level { transition: stroke-dashoffset 0.9s cubic-bezier(0.2, 0.8, 0.2, 1), stroke 0.9s; }
+  .gauge.pulse .level { filter: drop-shadow(0 0 4px currentColor); }
+  .gauge .value { position: absolute; top: 0; left: 0; right: 0; height: 52px; line-height: 52px; color: var(--ink); font-size: 13px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .gauge .delta { position: absolute; top: 34px; left: 0; right: 0; font-size: 9.5px; font-weight: 600; opacity: 0; transition: opacity 0.4s; font-variant-numeric: tabular-nums; }
+  .gauge .delta.shown { opacity: 1; }
+  .gauge .delta.up { color: rgb(var(--fix)); }
+  .gauge .delta.down { color: rgb(200, 70, 60); }
+  .gauge .name { display: block; overflow-wrap: break-word; color: var(--ink); opacity: 0.75; }
+  .gauge .tip { display: none; position: absolute; z-index: 5; top: calc(100% + 6px); left: 50%; transform: translateX(-50%); width: 13rem; padding: 6px 8px; border-radius: 6px; background: var(--ink); color: var(--paper); text-align: left; line-height: 1.35; }
+  .gauge:hover .tip { display: block; }
+  .gauge .tip b { color: rgb(var(--thread)); font-weight: 600; }
+  .jev-meter { flex-basis: 100%; display: flex; justify-content: space-between; font-size: 10.5px; letter-spacing: 0.02em; }
+  .jev-meter b { color: rgb(var(--thread)); font-weight: 600; }
+  .count { align-self: center; margin-left: 8px; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--card-edge); font-variant-numeric: tabular-nums; color: var(--ink); }
   .count.over { color: rgb(200, 60, 50); font-weight: 600; }
   .page { transition: margin-left 0.35s cubic-bezier(0.2, 0.8, 0.2, 1); }
   body.feed-open .page { margin-left: max(16px, calc(50vw - 690px)); }
@@ -259,11 +273,20 @@ function renderThread(sheet) {
   const card = document.createElement("div");
   card.className = thread.kept ? "card shake" : "card";
   const lines = thread.question ? [`<p><b>You</b>${escape(thread.question)}</p>`] : [];
-  const measures = (thread.measures || []).map((measure) => `<span class="measure">${escape(measure.label)} ${Math.round(100 * measure.probability)}%</span>`).join("");
-  lines.push(`<p class="coworker"><b>jevflow</b>${thread.answer === undefined ? '<span class="status">thinking…</span>' : measures + escape(thread.answer)}</p>`);
+  lines.push(`<p class="coworker"><b>jevflow</b>${thread.answer === undefined ? '<span class="status">thinking…</span>' : `<span class="measures"></span>${escape(thread.answer)}`}</p>`);
   if (thread.reply) lines.push(`<p><b>You</b>${escape(thread.reply)}</p>`);
   if (thread.status) lines.push(`<p class="status">${escape(thread.status)}</p>`);
   card.innerHTML = lines.join("");
+  const slot = card.querySelector(".measures");
+  if (slot && thread.measures) {
+    if (!thread.rings) { thread.rings = Object.assign(document.createElement("div"), { className: "rings" }); thread.ref = ++threadRefs; }
+    for (const measure of thread.measures) {
+      let ring = [...thread.rings.children].find((element) => element.dataset.name === measure.label);
+      if (!ring) { ring = createRing(measure.label, `gauge:${thread.ref}-${measure.label}`); ring.classList.add("mini"); thread.rings.appendChild(ring); }
+      setRing(ring, measure.probability, measure.question);
+    }
+    slot.replaceWith(thread.rings);
+  }
   card.style.top = `${span.getClientRects()[0].top - sheet.top - 4}px`;
   commentsLayer.appendChild(card);
 }
@@ -474,7 +497,7 @@ async function findNotes() {
   applyPendingFixes();
   liftNotes();
   render();
-  if (currentGoal() !== gaugeGoal) refreshGauges();
+  if ([currentGoal(), latestHeader("audience"), latestHeader("tone")].join("\n") !== gaugeBrief) refreshGauges();
   if (editor.value !== text) insightsTimer = setTimeout(findInsights, 300);
 }
 
@@ -519,54 +542,101 @@ async function findInsights() {
 
 const gaugesBox = document.getElementById("gauges");
 const GAUGE_LEVELS = [[0.2, "weak"], [0.4, "shaky"], [0.6, "so-so"], [0.8, "good"], [1.01, "strong"]];
-const GAUGE_RING = 2 * Math.PI * 18;
-let gauges = [], gaugeLimit = null, gaugeGoal = "", gaugesRequest = 0;
+const GAUGE_RING = 2 * Math.PI * 21;
+const GAUGE_FADE_MS = 500;
+const DELTA_MS = 2500;
+let gauges = [], gaugeLimit = null, gaugeBrief = "", gaugesRequest = 0, gaugeSeconds = null;
+const gaugeTimings = [];
+let threadRefs = 0;
+const graphemes = new Intl.Segmenter();
+
+function latestHeader(field) {
+  const entries = headers.filter((header) => header.field === field);
+  return entries.length ? entries[entries.length - 1].text : "";
+}
 
 function currentGoal() {
-  const goals = headers.filter((header) => header.field === "goal");
-  return goals.length ? goals[goals.length - 1].text : "";
+  return latestHeader("goal");
 }
 
 function gaugeColor(probability) {
-  return `hsl(${Math.round(120 * probability)}, 55%, 45%)`;
+  return `hsl(${Math.round(8 + 130 * probability)}, 62%, 48%)`;
+}
+
+function levelWord(probability) {
+  return GAUGE_LEVELS.find(([ceiling]) => probability < ceiling)[1];
+}
+
+function createRing(name, reference) {
+  const element = document.createElement("div");
+  element.className = "gauge entering";
+  element.dataset.name = name;
+  element.dataset.ref = reference;
+  element.innerHTML = `<svg viewBox="0 0 52 52"><circle class="track" cx="26" cy="26" r="21" fill="none" stroke-width="5"/><circle class="level" cx="26" cy="26" r="21" fill="none" stroke-width="5" stroke-linecap="round" stroke-dasharray="${GAUGE_RING}" stroke-dashoffset="${GAUGE_RING}"/></svg><span class="value">0%</span><span class="delta"></span><span class="name">${escape(name)}</span><span class="tip"></span>`;
+  element.shown = 0;
+  element.target = null;
+  return element;
+}
+
+function setRing(element, probability, question) {
+  element.getBoundingClientRect();
+  element.classList.remove("entering");
+  const percent = Math.round(100 * probability);
+  element.querySelector(".tip").innerHTML = `“${escape(question)}”<br>${percent}% yes · ${levelWord(probability)}`;
+  if (element.target === probability) return;
+  const change = element.target === null ? 0 : percent - Math.round(100 * element.target);
+  element.target = probability;
+  const ring = element.querySelector(".level");
+  ring.style.strokeDashoffset = `${GAUGE_RING * (1 - probability)}px`;
+  ring.style.stroke = gaugeColor(probability);
+  ring.style.color = gaugeColor(probability);
+  tweenValue(element, probability);
+  if (!change) return;
+  const delta = element.querySelector(".delta");
+  delta.textContent = change > 0 ? `▲ ${change}` : `▼ ${-change}`;
+  delta.className = `delta shown ${change > 0 ? "up" : "down"}`;
+  element.classList.add("pulse");
+  clearTimeout(element.deltaTimer);
+  element.deltaTimer = setTimeout(() => { delta.classList.remove("shown"); element.classList.remove("pulse"); }, DELTA_MS);
 }
 
 function renderGauges() {
   if (!currentGoal()) { gaugesBox.innerHTML = ""; return; }
+  let meter = gaugesBox.querySelector(".jev-meter");
+  if (!meter && gauges.length) { meter = document.createElement("div"); meter.className = "jev-meter"; gaugesBox.prepend(meter); }
+  if (meter) meter.innerHTML = `<span>Impact for <b>${escape(currentGoal())}</b></span><span>${gauges.length} questions${gaugeSeconds === null ? "" : ` · ${gaugeSeconds.toFixed(2)} s`}</span>`;
   for (const gauge of gauges) {
-    let element = gaugesBox.querySelector(`[data-name="${CSS.escape(gauge.name)}"]`);
+    let element = gaugesBox.querySelector(`.gauge[data-name="${CSS.escape(gauge.name)}"]:not(.leaving)`);
     if (!element) {
-      element = document.createElement("div");
-      element.className = "gauge";
-      element.dataset.name = gauge.name;
-      element.innerHTML = `<svg viewBox="0 0 44 44"><circle class="track" cx="22" cy="22" r="18" fill="none" stroke-width="4"/><circle class="level" cx="22" cy="22" r="18" fill="none" stroke-width="4" stroke-linecap="round" stroke-dasharray="${GAUGE_RING}" stroke-dashoffset="${GAUGE_RING}"/></svg><span class="value">0%</span><span class="name">${escape(gauge.name)}</span>`;
-      element.shown = 0;
-      gaugesBox.appendChild(element);
+      element = createRing(gauge.name, `gauge:${gauge.name}`);
+      gaugesBox.insertBefore(element, gaugesBox.querySelector(".count"));
     }
-    element.dataset.level = GAUGE_LEVELS.find(([ceiling]) => gauge.probability < ceiling)[1];
-    const ring = element.querySelector(".level");
-    requestAnimationFrame(() => {
-      ring.style.strokeDashoffset = `${GAUGE_RING * (1 - gauge.probability)}px`;
-      ring.style.stroke = gaugeColor(gauge.probability);
-    });
-    tweenValue(element, gauge.probability);
+    setRing(element, gauge.probability, gauge.question);
   }
-  for (const element of [...gaugesBox.querySelectorAll(".gauge")]) {
-    if (!gauges.some((gauge) => gauge.name === element.dataset.name)) element.remove();
+  for (const element of [...gaugesBox.querySelectorAll(".gauge:not(.leaving)")]) {
+    if (gauges.some((gauge) => gauge.name === element.dataset.name)) continue;
+    element.classList.add("leaving");
+    setTimeout(() => element.remove(), GAUGE_FADE_MS);
   }
   let count = gaugesBox.querySelector(".count");
   if (gaugeLimit && !count) { count = document.createElement("div"); count.className = "count"; gaugesBox.appendChild(count); }
   if (!gaugeLimit && count) count.remove();
   if (gaugeLimit) {
-    const length = editor.value.trim().length;
+    const length = textLength(editor.value.trim());
     count.textContent = `${length} / ${gaugeLimit}`;
-    count.classList.toggle("over", length > gaugeLimit);
+    count.style.color = length > gaugeLimit ? "rgb(200, 70, 60)" : "";
   }
+}
+
+function textLength(text) {
+  return [...graphemes.segment(text)].length;
 }
 
 function tweenValue(element, target) {
   const from = element.shown, began = performance.now();
+  element.tween = began;
   const step = (now) => {
+    if (element.tween !== began) return;
     const progress = Math.min(1, (now - began) / 900);
     element.shown = from + (target - from) * (1 - Math.pow(1 - progress, 3));
     element.querySelector(".value").textContent = `${Math.round(100 * element.shown)}%`;
@@ -576,12 +646,15 @@ function tweenValue(element, target) {
 }
 
 async function refreshGauges() {
-  const goal = currentGoal(), text = editor.value;
-  if (goal !== gaugeGoal) { gaugeGoal = goal; gauges = []; gaugesBox.innerHTML = ""; }
-  if (!goal || !text.trim()) { renderGauges(); return; }
-  const request = ++gaugesRequest;
-  const result = await post("/gauges", { text, goal });
-  if (request !== gaugesRequest || currentGoal() !== goal) return;
+  const goal = currentGoal(), audience = latestHeader("audience"), tone = latestHeader("tone"), text = editor.value;
+  const brief = [goal, audience, tone].join("\n");
+  gaugeBrief = brief;
+  const request = ++gaugesRequest, began = performance.now();
+  if (!goal || !text.trim()) { gauges = []; renderGauges(); return; }
+  const result = await post("/gauges", { text, goal, audience, tone });
+  if (request !== gaugesRequest || gaugeBrief !== brief || editor.value !== text) return;
+  gaugeTimings.push((performance.now() - began) / 1000);
+  gaugeSeconds = result.seconds;
   gauges = result.gauges;
   gaugeLimit = result.limit;
   renderGauges();

@@ -115,7 +115,7 @@ async def fixes(draft: TypedDraft) -> dict:
     goal, categories = draft.goal.strip(), []
     if goal:
         try:
-            categories = await gauges.categories(goal)
+            categories = await gauges.categories(goal, draft.text)
         except Exception as error:
             print(f"/fixes: no goal categories ({error!r}); corrections only", flush=True)
     fixes, suggestions = await decide.find_fixes(draft.text, draft.limit, goal if categories else "", categories)
