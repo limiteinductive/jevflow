@@ -79,7 +79,8 @@ class Candidate(BaseModel):
     id: str
     title: str
     line: str
-    """The page's line that shares the most words with the question."""
+    """The page's line that shares the most words with the question, quoted back to the writer."""
+    text: str
 
 
 class PageSearch(BaseModel):
@@ -87,7 +88,7 @@ class PageSearch(BaseModel):
     open: bool
     """The writer asks to go to the page, rather than about what it says."""
     candidates: list[Candidate]
-    """The writer's other pages whose title or text shares a word with the question, found by the page's keyword pass."""
+    """The writer's other pages, most shared words with the question first, from the page's keyword pass."""
 
 
 class Undo(BaseModel):
@@ -206,7 +207,7 @@ async def remember(sentence: str) -> None:
     file = PROFILE if lines[0] == PROFILE else "preferences" if lines[0] == "preferences" else "people/" + re.sub(r"[^a-z0-9-]", "", lines[0].removeprefix("people/").lower())
     if file == "people/":
         return
-    fair = {"fair": f"Is '{lines[2]}' a fair statement of what the writer said in '{sentence}'?"}
+    fair = {"fair": f"Is every part of '{lines[2]}' stated in '{sentence}'?"}
     keywords = [keyword.strip().lower() for keyword in lines[1].split(",") if keyword.strip()] + [file.removeprefix("people/")] * file.startswith("people/")
     await store(file, keywords, lines[2], fair, f"Remember: {lines[2]}")
 
@@ -244,9 +245,9 @@ async def search_pages(search: PageSearch) -> dict:
     """The candidate Jev ranks highest on "does this page answer the question?" (or "is it the page to open?"), with its P, or an empty reply when none reaches `RELEVANT_THRESHOLD`."""
     if not search.candidates:
         return {}
-    asks = "Is the page '{title}' the one the writer asks for in '{question}'?" if search.open else "Does the writer's page '{title}', with the line '{line}', answer '{question}'?"
+    asks = "Is the page '{title}' the one the writer asks for in '{question}'?" if search.open else "Does the writer's page '{title}', which reads '{text}', answer '{question}'?"
     fields = {
-        f"answers_{index}": (jev.YesNo, Field(description=asks.format(title=candidate.title, line=candidate.line, question=search.question)))
+        f"answers_{index}": (jev.YesNo, Field(description=asks.format(title=candidate.title, text=candidate.text[:MAX_DRAFT_CHARS], question=search.question)))
         for index, candidate in enumerate(search.candidates)
     }
     check = await jev.run(create_model("PageSearch", __doc__="A writer asks jevflow about their other pages.", **fields), f"Question: {search.question}")
