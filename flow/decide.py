@@ -300,7 +300,7 @@ async def question_span(sentence: str, question: str) -> str | None:
 
 
 async def timing(text: str) -> Timing:
-    """Whether now is a moment to show the writer anything unasked: every comment, popup and fix waits for it (the page's shortcut until a single per-pause decision motor exists)."""
+    """Whether now is a moment to show the writer anything unasked: every comment and popup waits for it; fixes do not (the page's shortcut until a single per-pause decision motor exists)."""
     Moment = create_model(
         "Moment",
         __doc__=f"A writer is typing a draft; the end of it so far is: '{text[-TIMING_CONTEXT_CHARS:]}'.",

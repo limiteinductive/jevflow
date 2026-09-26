@@ -814,8 +814,8 @@ async function findFixes() {
   applyPendingFixes();
 }
 
+// A fix touches only a finished sentence behind the caret, and only when the text is unchanged since the request, so it skips the timing gate that comments and popups wait for.
 function applyPendingFixes() {
-  if (!settled()) return;
   const ready = pendingFixes.filter((fix) => editor.value.slice(fix.start, fix.end) === fix.text);
   pendingFixes = [];
   for (const fix of ready.sort((first, second) => second.start - first.start)) {
@@ -824,8 +824,10 @@ function applyPendingFixes() {
     flashes.push(flash);
     setTimeout(() => { flashes = flashes.filter((other) => other !== flash); render(); }, FLASH_MS);
   }
-  if (!ready.length && !thread) suggest(pendingSuggestions);
-  pendingSuggestions = [];
+  if (settled()) {
+    if (!ready.length && !thread) suggest(pendingSuggestions);
+    pendingSuggestions = [];
+  }
   render();
 }
 
