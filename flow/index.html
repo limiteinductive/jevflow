@@ -79,6 +79,8 @@
   .probed { border-radius: 3px; background: rgba(var(--thread), 0.1); }
   #probes { position: absolute; top: 0; left: calc(100% + 28px); }
   .probe { position: absolute; display: flex; align-items: center; gap: 5px; font: 600 11.5px/1 ui-monospace, "SF Mono", Menlo, monospace; color: var(--ink); white-space: nowrap; }
+  .probe .dots i { display: inline-block; width: 7px; height: 7px; margin-right: 3px; border-radius: 50%; border: 1.5px solid rgb(var(--thread)); }
+  .probe .dots i.pick { background: rgb(var(--thread)); }
   .probe svg { width: 22px; height: 22px; transform: rotate(-90deg); }
   .probe .track { stroke: var(--card-edge); }
   .probe .level { transition: stroke-dashoffset 0.9s ease, stroke 0.9s ease; }
@@ -976,8 +978,8 @@ async function handleRef(found) {
   if (result.intent === "mention" || !stillThere(span)) return;
   const [start, end] = removalRange(editor.value, span);
   applyEdit(start, end, "", `note ${span.text}`);
-  if (result.probability !== null) {
-    const probe = { ...found.snapshot.span, question, probability: result.probability, id: probes.length + 1 };
+  if (result.probability !== null || result.options) {
+    const probe = { ...found.snapshot.span, question, probability: result.probability, options: result.options, pick: result.pick, id: probes.length + 1 };
     probes.push(probe);
     render();
     return;
@@ -1002,6 +1004,7 @@ function renderProbes(sheet) {
     const span = backdrop.querySelector(`[data-probe="${probe.id}"]`);
     if (!span) return "";
     const top = span.getClientRects()[0].top - sheet.top + 8;
+    if (probe.options) return `<div class="probe" data-ref="probe:${probe.id}" data-ref-data="${attribute(`"${probe.pick}" of ${probe.options.join(", ")} for "${probe.question}" about "${probe.text}"`)}" title="${attribute(probe.question)}" style="top: ${top}px"><span class="dots">${probe.options.map((option) => `<i class="${option === probe.pick ? "pick" : ""}" title="${attribute(option)}"></i>`).join("")}</span>${escape(probe.pick)}</div>`;
     return `<div class="probe" data-ref="probe:${probe.id}" data-ref-data="${escape(`P(yes) ${Math.round(100 * probe.probability)}% on "${probe.question}" about "${probe.text}"`).replace(/"/g, "&quot;")}" title="${escape(probe.question).replace(/"/g, "&quot;")}" style="top: ${top}px"><svg viewBox="0 0 22 22"><circle class="track" cx="11" cy="11" r="8" fill="none" stroke-width="3"/><circle class="level" cx="11" cy="11" r="8" fill="none" stroke-width="3" stroke-linecap="round" stroke-dasharray="${ring}" stroke-dashoffset="${ring * (1 - probe.probability)}"/></svg>${Math.round(100 * probe.probability)}%</div>`;
   }).join("");
 }
@@ -1024,7 +1027,7 @@ function trackProbes() {
 async function rescoreProbes() {
   for (const probe of probes) {
     const text = editor.value.slice(probe.start, probe.end);
-    if (text === probe.text) continue;
+    if (text === probe.text || probe.options) continue;
     probe.text = text;
     const result = await post("/probe", { question: probe.question, text });
     if (probe.text === text) { probe.probability = result.probability; render(); }
