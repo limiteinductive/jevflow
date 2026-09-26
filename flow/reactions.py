@@ -81,7 +81,7 @@ async def pick(sentence: str, goal: str) -> tuple[str, float] | None:
     )
     result, answers = await feed.ask(jev.agent, f"Line: {sentence}", Pick)
     option, probability = max(result.response.provider_details["probabilities"]["emoji"].items(), key=lambda item: item[1])
-    feed.act(answers, "shown" if probability >= PICK_FLOOR else "dropped", "emoji")
+    feed.act(answers, "shown" if probability >= PICK_FLOOR else "dropped", "emoji", component="reactions")
     return (option.split()[0], probability) if probability >= PICK_FLOOR else None
 
 
