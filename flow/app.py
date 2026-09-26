@@ -49,12 +49,16 @@ class Reply(BaseModel):
     sentence: str
     comment: str
     reply: str
+    proposed: str = ""
+    """A rewrite the comment already showed, checked instead of a fresh one."""
 
 
 class TypedDraft(BaseModel):
     text: str
     limit: int
     """Offset where the sentence being typed starts; only text before it is edited."""
+    goal: str = ""
+    """The Goal header, or empty; its gauge categories drive the goal suggestions."""
 
 
 @app.get("/")
@@ -98,12 +102,14 @@ async def answer(question: Question) -> dict:
 
 @app.post("/revise")
 async def revise(reply: Reply) -> dict:
-    return {"replacement": await decide.revise(reply.sentence, reply.comment, reply.reply)}
+    return {"replacement": await decide.revise(reply.sentence, reply.comment, reply.reply, reply.proposed)}
 
 
 @app.post("/fixes")
 async def fixes(draft: TypedDraft) -> dict:
-    return {"fixes": [asdict(fix) for fix in await decide.find_fixes(draft.text, draft.limit)]}
+    goal = draft.goal.strip()
+    fixes, suggestions = await decide.find_fixes(draft.text, draft.limit, goal, await gauges.categories(goal) if goal else [])
+    return {"fixes": [asdict(fix) for fix in fixes], "suggestions": [asdict(suggestion) for suggestion in suggestions]}
 
 
 if __name__ == "__main__":

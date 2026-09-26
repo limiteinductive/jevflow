@@ -80,7 +80,7 @@ const THREAD_FADE_SENTENCES = 2;
 let thread = null;
 let notes = [], insights = [], headers = [], history = [], flashes = [];
 const declined = new Set();
-let timing = null, pendingFixes = [];
+let timing = null, pendingFixes = [], pendingSuggestions = [];
 const settled = () => timing !== null && timing.mid_thought < 0.5 && timing.interrupt >= 0.3;
 let gaugesTimer, notesTimer, insightsTimer, fixesTimer, notesRequest = 0, insightsRequest = 0, fixesRequest = 0;
 
@@ -161,7 +161,7 @@ function renderThread(sheet) {
   if (!span) return;
   const card = document.createElement("div");
   card.className = "card";
-  const lines = [`<p><b>You</b>${escape(thread.question)}</p>`];
+  const lines = thread.question ? [`<p><b>You</b>${escape(thread.question)}</p>`] : [];
   const measures = (thread.measures || []).map((measure) => `<span class="measure">${escape(measure.label)} ${Math.round(100 * measure.probability)}%</span>`).join("");
   lines.push(`<p class="coworker"><b>jevflow</b>${thread.answer === undefined ? '<span class="status">thinking…</span>' : measures + escape(thread.answer)}</p>`);
   if (thread.reply) lines.push(`<p><b>You</b>${escape(thread.reply)}</p>`);
@@ -202,7 +202,7 @@ async function replyToThread(reply) {
   thread.reply = reply;
   thread.status = "Rewriting…";
   render();
-  const result = await post("/revise", { sentence: thread.anchor.text, comment: thread.answer, reply });
+  const result = await post("/revise", { sentence: thread.anchor.text, comment: thread.comment || thread.answer, reply, proposed: thread.replacement || "" });
   if (thread !== replied) return;
   if (!result.replacement || !stillThere(thread.anchor)) {
     thread.status = "Kept your sentence.";
@@ -217,6 +217,16 @@ async function replyToThread(reply) {
   flashes.push(flash);
   setTimeout(() => { flashes = flashes.filter((other) => other !== flash); render(); }, FLASH_MS);
   render();
+}
+
+function suggest(suggestions) {
+  const suggestion = suggestions.find((other) => stillThere(other) && !declined.has(`suggest ${other.text}`) && !notes.some((note) => note.start < other.end && other.start < note.end));
+  if (!suggestion) return;
+  declined.add(`suggest ${suggestion.text}`);
+  thread = {
+    anchor: { start: suggestion.start, end: suggestion.end, text: suggestion.text }, question: "", comment: suggestion.comment, answer: `${suggestion.comment} “${suggestion.replacement}”`,
+    measures: suggestion.measures, replacement: suggestion.replacement, status: 'Type "ok" to apply.',
+  };
 }
 
 async function post(path, body) {
@@ -328,11 +338,12 @@ async function findFixes() {
   const limit = typingStart();
   if (!text.slice(0, limit).trim()) return;
   const request = ++fixesRequest;
-  const result = await post("/fixes", { text, limit });
+  const result = await post("/fixes", { text, limit, goal: currentGoal() });
   if (request !== fixesRequest || editor.value !== text) return;
   const anchored = (fix) => thread && stillThere(thread.anchor) && fix.start < thread.anchor.end && thread.anchor.start < fix.end;
   const clear = result.fixes.filter((fix) => !declined.has(`fix ${fix.text} ${fix.replacement}`) && !anchored(fix) && !notes.some((note) => note.start < fix.end && fix.start < note.end));
   pendingFixes = clear;
+  pendingSuggestions = result.suggestions;
   applyPendingFixes();
 }
 
@@ -346,6 +357,8 @@ function applyPendingFixes() {
     flashes.push(flash);
     setTimeout(() => { flashes = flashes.filter((other) => other !== flash); render(); }, FLASH_MS);
   }
+  if (!ready.length && !thread) suggest(pendingSuggestions);
+  pendingSuggestions = [];
   render();
 }
 
