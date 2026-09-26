@@ -107,8 +107,13 @@ async def revise(reply: Reply) -> dict:
 
 @app.post("/fixes")
 async def fixes(draft: TypedDraft) -> dict:
-    goal = draft.goal.strip()
-    fixes, suggestions = await decide.find_fixes(draft.text, draft.limit, goal, await gauges.categories(goal) if goal else [])
+    goal, categories = draft.goal.strip(), []
+    if goal:
+        try:
+            categories = await gauges.categories(goal)
+        except Exception as error:
+            print(f"/fixes: no goal categories ({error!r}); corrections only", flush=True)
+    fixes, suggestions = await decide.find_fixes(draft.text, draft.limit, goal if categories else "", categories)
     return {"fixes": [asdict(fix) for fix in fixes], "suggestions": [asdict(suggestion) for suggestion in suggestions]}
 
 
