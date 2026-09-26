@@ -17,6 +17,15 @@ NOTE_EXAMPLES = [
     ("add the price here The plan costs less than lunch", "add the price here\nadd the price"),
 ]
 """Worked turns sent before the sentence; with only the instructions, the 1.7B model copies the instruction's example into every header."""
+AUDIENCE_INSTRUCTIONS = (
+    "The user message is one sentence a writer typed about what they are writing. "
+    "Reply with who the text is for, copied from the sentence. If the sentence does not say who it is for, reply with none."
+)
+AUDIENCE_EXAMPLES = [
+    ("ok writing a blog post for engineers about our CI", "engineers"),
+    ("replying to my boss about friday", "my boss"),
+    ("im writing a blog post about our launch", "none"),
+]
 FIX_INSTRUCTIONS = (
     "Fix spelling, grammar and punctuation mistakes in the user's sentence. Change nothing else: keep the writer's words, slang and tone. "
     "If nothing is wrong, reply with the sentence unchanged. Reply with the sentence only."
@@ -116,6 +125,12 @@ async def extract_note(sentence: str) -> tuple[str, str]:
     """The note words copied from `sentence`, and the note as a header value; both empty when the reply is not two lines."""
     lines = [line.strip().strip("'\"") for line in (await chat(NOTE_INSTRUCTIONS, NOTE_EXAMPLES, sentence, 40)).splitlines() if line.strip()]
     return (lines[0], lines[1]) if len(lines) == 2 else ("", "")
+
+
+async def extract_audience(sentence: str) -> str:
+    """Who `sentence` says the text is for, copied from it; empty when the local model reads no audience."""
+    audience = (await chat(AUDIENCE_INSTRUCTIONS, AUDIENCE_EXAMPLES, sentence, 20)).strip().strip("'\"")
+    return "" if audience.lower() == "none" else audience
 
 
 async def fix(sentence: str) -> str:
