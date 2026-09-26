@@ -26,26 +26,26 @@ MAX_DRAFT_CHARS = 600
 FACT_INSTRUCTIONS = (
     "The user message is a sentence a writer typed; it holds a lasting fact or preference about the writer. Reply with three lines. "
     "Line 1: where it goes: profile (the writer's life and work), preferences (how they like their writing), or people/<first name in lowercase> (someone in their life). "
-    "Line 2: comma-separated keywords a later draft about this would contain. Line 3: the fact as one short sentence about the writer, in the third person."
+    "Line 2: comma-separated keywords a later draft about this would contain. Line 3: the fact as one short casual sentence addressed to the writer as you."
 )
 FACT_EXAMPLES = [
-    ("my brother Tom hates long emails so keep it short", "people/tom\ntom, brother\nTom is the writer's brother and dislikes long emails."),
-    ("i always text in lowercase btw", "preferences\ntext, texting, message\nWrites texts in lowercase."),
-    ("I'm a nurse and I write these after night shifts", "profile\nwork, shift, nurse\nWorks night shifts as a nurse."),
+    ("my brother Tom hates long emails so keep it short", "people/tom\ntom, brother\nyour brother Tom hates long emails"),
+    ("i always text in lowercase btw", "preferences\ntext, texting, message\nyou text in lowercase"),
+    ("I'm a nurse and I write these after night shifts", "profile\nwork, shift, nurse\nyou're a nurse on night shifts"),
 ]
 UNDO_INSTRUCTIONS = (
     "A writing assistant changed a sentence in the writer's draft and the writer undid the change. "
     "Before is the writer's own sentence; After is the assistant's change, which the writer rejected. Reply with two lines. Line 1: comma-separated keywords a later draft of this kind would contain. "
-    "Line 2: the preference the rejection shows, as one short sentence about the writer, in the third person."
+    "Line 2: what the writer wants instead of the rejected change, as one short casual sentence addressed to the writer as you."
 )
 UNDO_EXAMPLES = [
     (
         "Draft: quick update for the team slack, we shipped the fix\nBefore: we shipped the fix lol\nAfter: We have successfully deployed the fix.",
-        "slack, team, update\nKeeps team Slack updates casual, with their own slang.",
+        "slack, team, update\nyou keep team Slack updates casual, slang and all",
     ),
     (
         "Draft: Goal: an email to my landlord\nthe heater is broken again, can someone come by this week\nBefore: the heater is broken again, can someone come by this week\nAfter: The heater is broken AGAIN!!! Send someone ASAP.",
-        "landlord, email, heater\nKeeps emails to their landlord calm and polite.",
+        "landlord, email, heater\nyou keep emails to your landlord calm and polite",
     ),
 ]
 
@@ -56,6 +56,8 @@ class Fact:
     """The file's path under `ROOT` without `.md`, such as "people/lena"."""
     text: str
     """The whole line after "- ", including its date."""
+    words: str
+    """The line without its date, as the page shows it."""
     day: str
     """The date the line carries, or empty."""
 
@@ -119,7 +121,10 @@ def files() -> list[str]:
 
 
 def facts(file: str) -> list[Fact]:
-    return [Fact(file, line, next(iter(re.findall(r"\d{4}-\d{2}-\d{2}", line)[-1:]), "")) for line in read(file)[1]]
+    return [
+        Fact(file, line, re.sub(r"; (stated|corrected) on \d{4}-\d{2}-\d{2}\.$", "", line), next(iter(re.findall(r"\d{4}-\d{2}-\d{2}", line)[-1:]), ""))
+        for line in read(file)[1]
+    ]
 
 
 def candidates(text: str) -> list[Fact]:
@@ -136,7 +141,7 @@ def candidates(text: str) -> list[Fact]:
 def context() -> str:
     """The profile and the recalled facts as a prompt preamble, or empty when jevflow knows nothing."""
     lines = [fact.text for fact in facts(PROFILE)] + [recall.fact.text for recall in recalled]
-    return "What you know about the writer:\n" + "".join(f"- {line}\n" for line in lines) + "\n" if lines else ""
+    return "What you know about the writer, who is \"you\" in these lines:\n" + "".join(f"- {line}\n" for line in lines) + "\n" if lines else ""
 
 
 def spawn(coroutine) -> None:
@@ -198,7 +203,7 @@ async def forget(sentence: str) -> None:
         for file in dict.fromkeys(fact.file for index, fact in enumerate(stored) if check[f"match_{index}"] >= KEEP_THRESHOLD):
             aliases, lines = read(file)
             gone = {fact.text for index, fact in enumerate(stored) if fact.file == file and check[f"match_{index}"] >= KEEP_THRESHOLD}
-            write(file, aliases, [line for line in lines if line not in gone] + [f"Forgotten at the writer's request ('{sentence}'); corrected on {date.today()}."], f"Forget: {sentence}")
+            write(file, aliases, [line for line in lines if line not in gone] + [f"you asked me to forget this ('{sentence}'); corrected on {date.today()}."], f"Forget: {sentence}")
 
 
 @router.get("/memory")

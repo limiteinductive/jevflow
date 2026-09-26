@@ -481,7 +481,7 @@ function renderMemory(memory) {
   if (!memory.facts.length) { box.innerHTML = ""; return; }
   const relevance = new Map(memory.recalled.map((recall) => [recall.text, recall.probability]));
   const ring = (probability) => probability === undefined ? '<span class="ring idle"></span>' : `<span class="ring" style="--relevance: ${probability.toFixed(2)}" title="relevant ${Math.round(100 * probability)}%"></span>`;
-  const items = memory.facts.map((fact) => `<li>${ring(relevance.get(fact.text))}${escape(fact.text)}</li>`);
+  const items = memory.facts.map((fact) => `<li title="${fact.day}">${ring(relevance.get(fact.text))}${escape(fact.words)}</li>`);
   const open = box.querySelector("details")?.open ? " open" : "";
   box.innerHTML = `<details${open}><summary>${memory.recalled.map((recall) => ring(recall.probability)).join("")}What jevflow knows about you</summary><ul>${items.join("")}</ul></details>`;
 }
