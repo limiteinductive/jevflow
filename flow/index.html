@@ -76,6 +76,12 @@
   .count { align-self: center; margin-left: 8px; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--card-edge); font-variant-numeric: tabular-nums; color: var(--ink); }
   [data-ref] { cursor: pointer; }
   .pill { border-radius: 4px; background: rgba(var(--thread), 0.16); color: rgb(var(--thread)); }
+  .probed { border-radius: 3px; background: rgba(var(--thread), 0.1); }
+  #probes { position: absolute; top: 0; left: calc(100% + 28px); }
+  .probe { position: absolute; display: flex; align-items: center; gap: 5px; font: 600 11.5px/1 ui-monospace, "SF Mono", Menlo, monospace; color: var(--ink); white-space: nowrap; }
+  .probe svg { width: 22px; height: 22px; transform: rotate(-90deg); }
+  .probe .track { stroke: var(--card-edge); }
+  .probe .level { transition: stroke-dashoffset 0.9s ease, stroke 0.9s ease; }
   .ref-gone { opacity: 0; transition: opacity 0.6s; pointer-events: none; }
   .count.over { color: rgb(200, 60, 50); font-weight: 600; }
   .page { transition: margin-left 0.35s cubic-bezier(0.2, 0.8, 0.2, 1); }
@@ -231,6 +237,7 @@
     <div id="asks"></div>
     <div id="comments"></div>
     <div id="reactions"></div>
+    <div id="probes"></div>
   </div>
 </div>
 <button id="feed-toggle" tabindex="-1" title="Decisions (Cmd+J)" aria-label="Decisions"><svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="7" width="2.4" height="6" rx="1"/><rect x="5.8" y="2" width="2.4" height="11" rx="1"/><rect x="10.6" y="5" width="2.4" height="8" rx="1"/></svg></button>
@@ -297,7 +304,11 @@ function render() {
   if (thread && stillThere(thread.anchor)) marks.push({ start: thread.anchor.start, end: thread.anchor.end, open: '<span class="anchor" data-thread="1">' });
   if (judged && stillThere(judged)) marks.push({ start: judged.start, end: judged.end, open: '<span class="judged">' });
   for (const flash of flashes.filter(stillThere)) marks.push({ start: flash.start, end: flash.end, open: '<span class="fixed">' });
-  for (const pill of refSpans(text, /@[\w-]+/g)) {
+  for (const probe of probes) {
+    if (marks.some((mark) => mark.start < probe.end && probe.start < mark.end)) continue;
+    marks.push({ start: probe.start, end: probe.end, open: `<span class="probed" data-probe="${probe.id}">` });
+  }
+  for (const pill of refSpans(text, REF_TOKEN)) {
     if (marks.some((mark) => mark.start < pill.end && pill.start < mark.end)) continue;
     marks.push({ start: pill.start, end: pill.end, open: '<span class="pill">' });
   }
@@ -335,6 +346,7 @@ function render() {
   }
   renderThread(sheet);
   renderReactions(sheet);
+  renderProbes(sheet);
   headersBox.innerHTML = Object.entries(FIELDS).map(([field, name]) => {
     const entries = headers.filter((header) => header.field === field).map((header) => escape(header.text));
     return entries.length ? `<div><b>${name}:</b>${entries.join("; ")}</div>` : "";
@@ -532,7 +544,7 @@ function clipToThread(note) {
 function liftNotes() {
   const limit = typingStart();
   const typedPast = (note) => note.end <= limit || (note.field === "undo" && /^\s+$/.test(editor.value.slice(note.end, editor.selectionStart)));
-  const ready = notes.filter((note) => stillThere(note) && typedPast(note) && !refSpans(note.text, /@[\w-]+/g).length && !declined.has(`note ${note.text}`)).sort((first, second) => second.start - first.start);
+  const ready = notes.filter((note) => stillThere(note) && typedPast(note) && !refSpans(editor.value.slice(0, note.start).match(/[^.!?\n]*$/)[0] + note.text, REF_TOKEN).length && !declined.has(`note ${note.text}`)).sort((first, second) => second.start - first.start);
   for (const found of ready) {
     notes = notes.filter((other) => other !== found);
     const note = clipToThread(found);
@@ -583,6 +595,7 @@ async function findNotes() {
   applyPendingFixes();
   liftNotes();
   render();
+  rescoreProbes();
   if (timing.mid_thought < 0.5) refSpans(editor.value, REF_SPAN).filter((span) => !handledRefs.has(span.text)).forEach(handleRef);
   if ([currentGoal(), latestHeader("audience"), latestHeader("tone")].join("\n") !== gaugeBrief) refreshGauges();
   if (editor.value !== text) insightsTimer = setTimeout(findInsights, 300);
@@ -859,7 +872,9 @@ window.addEventListener("keydown", (event) => {
   }
 });
 
-const REF_SPAN = /[^.!?\n]*@[\w-]+[^.!?\n]*[.!?]?/g;
+const REF_TOKEN = /@(?:"[^"\n]*"|[\w-]+)/g;
+const REF_SPAN = /[^.!?\n@]*@(?:"[^"\n]*"|[\w-]+)[^.!?\n]*[.!?]?/g;
+let probes = [], previousValue = "";
 const handledRefs = new Set();
 const snapshots = new Map();
 const slug = (text) => text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 24);
@@ -873,7 +888,7 @@ function refToken(element) {
 }
 
 function refSpans(text, pattern) {
-  return [...text.matchAll(pattern)].map((match) => ({ start: match.index, end: match.index + match[0].length, text: match[0], snapshot: snapshots.get(match[0].match(/@[\w-]+/)[0]) }))
+  return [...text.matchAll(pattern)].map((match) => ({ start: match.index, end: match.index + match[0].length, text: match[0], snapshot: snapshots.get(match[0].match(new RegExp(REF_TOKEN.source))[0]) }))
     .filter((span) => span.snapshot && span.text.trim());
 }
 
@@ -883,11 +898,18 @@ async function handleRef(found) {
   const span = { start: found.start + leading, end: found.end, text: found.text.trim() };
   const anchor = previousSentence(editor.value, span.start);
   const { ref, component } = found.snapshot;
-  const result = await post("/component", { span: span.text, component, sentence: anchor.text, paragraph: editor.value.slice(Math.max(0, span.start - 400), span.start), goal: currentGoal() });
+  const question = span.text.replace(new RegExp(REF_TOKEN.source), "").trim();
+  const result = await post("/component", { span: span.text, question, component, sentence: anchor.text, paragraph: editor.value.slice(Math.max(0, span.start - 400), span.start), goal: currentGoal() });
   if (result.intent === "mention" || !stillThere(span)) return;
   const [start, end] = removalRange(editor.value, span);
   applyEdit(start, end, "", `note ${span.text}`);
-  if (result.intent === "question") {
+  if (result.intent === "yes_no" && found.snapshot.span) {
+    const probe = { ...found.snapshot.span, question, probability: result.probability, id: probes.length + 1 };
+    probes.push(probe);
+    render();
+    return;
+  }
+  if (result.intent === "question" || result.intent === "yes_no") {
     const target = previousSentence(editor.value, start);
     thread = { anchor: target.text ? target : anchor, question: span.text, answer: result.answer.text, measures: result.answer.measures };
     render();
@@ -899,6 +921,57 @@ async function handleRef(found) {
   element.classList.add("ref-gone");
   setTimeout(() => { element.hidden = true; }, 600);
 }
+
+function renderProbes(sheet) {
+  const box = document.getElementById("probes");
+  const ring = 2 * Math.PI * 8;
+  box.innerHTML = probes.map((probe) => {
+    const span = backdrop.querySelector(`[data-probe="${probe.id}"]`);
+    if (!span) return "";
+    const top = span.getClientRects()[0].top - sheet.top + 8;
+    return `<div class="probe" data-ref="probe:${probe.id}" data-ref-data="${escape(`P(yes) ${Math.round(100 * probe.probability)}% on "${probe.question}" about "${probe.text}"`).replace(/"/g, "&quot;")}" title="${escape(probe.question).replace(/"/g, "&quot;")}" style="top: ${top}px"><svg viewBox="0 0 22 22"><circle class="track" cx="11" cy="11" r="8" fill="none" stroke-width="3"/><circle class="level" cx="11" cy="11" r="8" fill="none" stroke-width="3" stroke-linecap="round" stroke-dasharray="${ring}" stroke-dashoffset="${ring * (1 - probe.probability)}" stroke="${gaugeColor(probe.probability)}"/></svg>${Math.round(100 * probe.probability)}%</div>`;
+  }).join("");
+}
+
+function trackProbes() {
+  const before = previousValue, after = editor.value;
+  previousValue = after;
+  let prefix = 0;
+  while (prefix < before.length && before[prefix] === after[prefix]) prefix += 1;
+  let suffix = 0;
+  while (suffix < before.length - prefix && before[before.length - 1 - suffix] === after[after.length - 1 - suffix]) suffix += 1;
+  const removedEnd = before.length - suffix, shift = after.length - before.length;
+  for (const probe of probes) {
+    if (removedEnd <= probe.start) { probe.start += shift; probe.end += shift; }
+    else if (prefix <= probe.end) probe.end = Math.max(probe.start, probe.end + shift);
+  }
+  probes = probes.filter((probe) => probe.end > probe.start);
+}
+
+async function rescoreProbes() {
+  for (const probe of probes) {
+    const text = editor.value.slice(probe.start, probe.end);
+    if (text === probe.text) continue;
+    probe.text = text;
+    const result = await post("/probe", { question: probe.question, text });
+    if (probe.text === text) { probe.probability = result.probability; render(); }
+  }
+}
+
+editor.addEventListener("copy", (event) => {
+  const { selectionStart: start, selectionEnd: end } = editor;
+  const text = editor.value.slice(start, end);
+  if (!text.trim()) return;
+  const words = text.replace(/[".!?\n]/g, " ").trim().split(/\s+/);
+  const token = `@"${words.slice(0, 3).join(" ")}"`;
+  snapshots.set(token, { ref: `span:${start}`, component: `the writer's text: "${text}"`, span: { start, end, text } });
+  event.clipboardData.setData("text/plain", token + " ");
+  event.preventDefault();
+  const flash = { start, end, text };
+  flashes.push(flash);
+  setTimeout(() => { flashes = flashes.filter((other) => other !== flash); render(); }, FLASH_MS);
+  render();
+});
 
 document.addEventListener("click", (event) => {
   const element = event.target.closest("[data-ref]");
@@ -912,6 +985,7 @@ document.addEventListener("click", (event) => {
 
 editor.addEventListener("input", () => {
   inputs += 1;
+  trackProbes();
   timing = null;
   renderGauges();
   clearTimeout(notesTimer);

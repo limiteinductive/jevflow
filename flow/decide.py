@@ -55,7 +55,7 @@ Scope = Literal["sentence", "paragraph"]
 
 QuestionKind = Literal["understand", "opinion", "cut_or_keep", "true", "wording", "other"]
 
-ComponentIntent = Literal["question", "instruction", "mention"]
+ComponentIntent = Literal["yes_no", "question", "instruction", "mention"]
 
 HeaderField = Literal["goal", "audience", "tone", "to_do", "undo"]
 
@@ -109,7 +109,9 @@ class Answer:
 class ComponentReply:
     intent: "ComponentIntent"
     answer: Answer | None
-    """The coworker's reply when the writer asked about the component."""
+    """The coworker's reply when the writer asked an open question about the component."""
+    probability: float | None
+    """Jev's P(yes) on the writer's own question when it is a yes/no question."""
 
 
 @dataclass(frozen=True)
@@ -415,17 +417,21 @@ async def revise(sentence: str, comment: str, reply: str, proposed: str, memory:
     return replacement if replacement and min(check.values()) >= FIX_THRESHOLD else None
 
 
-async def about_component(span: str, component: str, sentence: str, paragraph: str, goal: str, memory: str) -> ComponentReply:
+async def about_component(span: str, question: str, component: str, sentence: str, paragraph: str, goal: str, memory: str) -> ComponentReply:
     """What the writer meant by typing `span` with a pasted reference to a page component, and the coworker's answer when it is a question.
 
-    The answer is drafted while Jev decides the intent, so a question costs no extra round.
+    `question` is `span` without the reference. The answer and the yes/no probe run while Jev decides the intent, so neither costs an extra round.
     """
     Intent = create_model(
         "Intent",
         __doc__=f"A writer pasted a reference to a part of their writing assistant's page into their draft. That part: {component}. They typed: '{span}'.",
-        intent=(ComponentIntent, Field(description="question: they ask about that part; instruction: they ask to change, drop, forget or mark it done; mention: it is part of the text they are writing.")),
+        intent=(ComponentIntent, Field(description="yes_no: they ask a yes or no question about that part; question: they ask an open question about it; instruction: they ask to change, drop, forget or mark it done; mention: it is part of the text they are writing.")),
     )
-    intent_task = asyncio.create_task(run(Intent, f"Typed: {span}"))
-    reply = await answer(sentence or paragraph, paragraph, f"{span} ({component})", goal, memory)
-    intent = (await intent_task)["intent"]
-    return ComponentReply(intent, reply if intent == "question" else None)
+    intent, reply, probability = await asyncio.gather(run(Intent, f"Typed: {span}"), answer(sentence or paragraph, paragraph, f"{span} ({component})", goal, memory), probe(question, component))
+    return ComponentReply(intent["intent"], reply if intent["intent"] == "question" else None, probability if intent["intent"] == "yes_no" else None)
+
+
+async def probe(question: str, text: str) -> float:
+    """Jev's P(yes) on the writer's own yes/no `question` about `text`."""
+    Probe = create_model("Probe", __doc__=f"A writer asks a yes or no question about a part of their draft: {text}", answer=(YesNo, Field(description=question)))
+    return (await run(Probe, f"Text: {text}\n\nQuestion: {question}"))["answer"]
