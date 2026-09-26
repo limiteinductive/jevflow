@@ -39,6 +39,8 @@ ANSWER_FLOOR = 0.3
 """Below this on "answers the writer's question?" for every draft, the drafts are resampled once."""
 FIX_THRESHOLD = 0.7
 """Every fix question must reach this; a real spelling fix scores at least 0.90 on all four and an unchanged sentence 0.00 on `real_mistake`."""
+HURTS_THRESHOLD = 0.7
+"""A sentence gets a goal suggestion when Jev's P(it makes the text less of a Goal category) reaches this."""
 NOTE_CONTEXT = "A writer types their text and, in the same stream, notes to a writing assistant such as 'make this punchier', 'this is for engineers', 'im writing a blog post', 'replying to my boss about friday' or 'undo'."
 
 YesNo = Literal["yes", "no"]
@@ -51,7 +53,6 @@ Scope = Literal["sentence", "paragraph"]
 QuestionKind = Literal["understand", "opinion", "cut_or_keep", "true", "wording", "other"]
 
 HeaderField = Literal["goal", "audience", "tone", "to_do", "undo"]
-
 
 @dataclass(frozen=True)
 class Note:
@@ -104,6 +105,24 @@ class Timing:
     """P(a suggestion about the finished text is welcome now)."""
 
 
+@dataclass(frozen=True)
+class GoalSuggestion:
+    replacement: str
+    comment: str
+    """Why the sentence should change, such as "For a LinkedIn post, this sentence works against 'concrete'."."""
+    measures: list[Measure]
+
+
+@dataclass(frozen=True)
+class Suggestion:
+    start: int
+    end: int
+    text: str
+    replacement: str
+    comment: str
+    measures: list[Measure]
+
+
 agent = Agent(MODEL)
 """One agent for every decision: a fresh agent per call opens a new connection and adds about 0.4 s."""
 
@@ -113,8 +132,8 @@ sentence_notes: dict[tuple[str, str], SentenceNote | None] = {}
 decisions = 0
 """Jev questions answered since the server started, one per yes/no or choice field."""
 
-sentence_fixes: dict[str, str | None] = {}
-"""Jev-accepted replacements by sentence text, decided once per sentence like `sentence_notes`."""
+sentence_fixes: dict[tuple[str, str], tuple[str | None, GoalSuggestion | None]] = {}
+"""Jev-accepted correction and goal suggestion by sentence text and Goal, decided once per pair like `sentence_notes`."""
 
 
 def line_sentences(text: str, breaks: list[int]) -> list[Sentence]:
@@ -237,37 +256,60 @@ async def find_notes(text: str, comment: str, breaks: list[int]) -> list[Note]:
     return notes
 
 
-async def decide_fix(sentence: str) -> str | None:
-    """The LLM's correction of `sentence` when Jev says it keeps the meaning and the voice, stays small and fixes a real mistake."""
+async def decide_fix(sentence: str, goal: str, categories: list[str]) -> tuple[str | None, GoalSuggestion | None]:
+    """The LLM's correction of `sentence` when Jev says it keeps the meaning and the voice, stays small and fixes a real mistake.
+
+    Without an accepted correction, one question per Goal category (the gauges' categories) rides in the same request.
+    When Jev says the sentence makes the text less of a category, the LLM rewrites it and `revise` gates the rewrite.
+    """
     replacement = await generator.fix(sentence)
-    if replacement in ("", sentence):
-        return None
-    FixCheck = create_model(
-        "FixCheck",
-        __doc__=f"A writing assistant proposes a correction to a writer's sentence. Sentence: '{sentence}'. Correction: '{replacement}'.",
-        keeps_meaning=(YesNo, Field(description="Does the correction keep every fact and the meaning of the sentence?")),
-        same_voice=(YesNo, Field(description="Does the correction still sound like the writer?")),
-        small=(YesNo, Field(description="Does the correction only fix mistakes, changing as few words as possible?")),
-        real_mistake=(YesNo, Field(description="Does the correction fix a real mistake in the sentence?")),
-        on_purpose=(YesNo, Field(description="Does the correction change a spelling or word the writer chose on purpose, for voice or a joke (like 'akshually' or 'gonna')?")),
-    )
-    check = await run(FixCheck, f"Sentence: {sentence}\n\nCorrection: {replacement}")
-    return replacement if min(check["keeps_meaning"], check["same_voice"], check["small"], check["real_mistake"], 1 - check["on_purpose"]) >= FIX_THRESHOLD else None
+    corrects = replacement not in ("", sentence)
+    if not corrects and not categories:
+        return None, None
+    fields = {}
+    if corrects:
+        fields.update(
+            keeps_meaning=(YesNo, Field(description="Does the correction keep every fact and the meaning of the sentence?")),
+            same_voice=(YesNo, Field(description="Does the correction still sound like the writer?")),
+            small=(YesNo, Field(description="Does the correction only fix mistakes, changing as few words as possible?")),
+            real_mistake=(YesNo, Field(description="Does the correction fix a real mistake in the sentence?")),
+            on_purpose=(YesNo, Field(description="Does the correction change a spelling or word the writer chose on purpose, for voice or a joke (like 'akshually' or 'gonna')?")),
+        )
+    fields.update({f"hurts_{index}": (YesNo, Field(description=f"Does the sentence make the text less {category}?")) for index, category in enumerate(categories)})
+    context = f"A writer drafting {goal} wrote a sentence." if categories else "A writer wrote a sentence."
+    correction = f" A writing assistant proposes a correction. Correction: '{replacement}'." if corrects else ""
+    FixCheck = create_model("FixCheck", __doc__=f"{context} Sentence: '{sentence}'.{correction}", **fields)
+    check = await run(FixCheck, f"Sentence: {sentence}" + (f"\n\nCorrection: {replacement}" if corrects else ""))
+    if corrects and min(check["keeps_meaning"], check["same_voice"], check["small"], check["real_mistake"], 1 - check["on_purpose"]) >= FIX_THRESHOLD:
+        return replacement, None
+    hurt = [(check[f"hurts_{index}"], category) for index, category in enumerate(categories) if check[f"hurts_{index}"] >= HURTS_THRESHOLD]
+    if not hurt:
+        return None, None
+    against = " and ".join(f"'{category}'" for _, category in hurt)
+    comment = f"For {goal}, this sentence works against {against}."
+    rewrite = await revise(sentence, comment, "ok")
+    if rewrite is None or rewrite == sentence:
+        return None, None
+    return None, GoalSuggestion(rewrite, comment, [Measure(category, 1 - probability) for probability, category in hurt])
 
 
-async def find_fixes(text: str, limit: int) -> list[Fix]:
-    """Accepted corrections for the sentences that end at or before `limit`, the start of the sentence being typed."""
+async def find_fixes(text: str, limit: int, goal: str, categories: list[str]) -> tuple[list[Fix], list[Suggestion]]:
+    """Accepted corrections and goal suggestions for the sentences that end at or before `limit`, the start of the sentence being typed."""
     sentences = [
         sentence for sentence in line_sentences(text, []) if sentence.start + len(sentence.text) <= limit and text.startswith(sentence.text, sentence.start)
     ]
-    fresh = list(dict.fromkeys(sentence.text for sentence in sentences if sentence.text not in sentence_fixes))
-    for sentence, replacement in zip(fresh, await asyncio.gather(*(decide_fix(sentence) for sentence in fresh))):
-        sentence_fixes[sentence] = replacement
-    return [
-        Fix(sentence.start, sentence.start + len(sentence.text), sentence.text, sentence_fixes[sentence.text])
-        for sentence in sentences
-        if sentence_fixes[sentence.text] is not None
-    ]
+    fresh = list(dict.fromkeys(sentence.text for sentence in sentences if (sentence.text, goal) not in sentence_fixes))
+    for sentence, decision in zip(fresh, await asyncio.gather(*(decide_fix(sentence, goal, categories) for sentence in fresh))):
+        sentence_fixes[sentence, goal] = decision
+    fixes, suggestions = [], []
+    for sentence in sentences:
+        replacement, suggestion = sentence_fixes[sentence.text, goal]
+        end = sentence.start + len(sentence.text)
+        if replacement is not None:
+            fixes.append(Fix(sentence.start, end, sentence.text, replacement))
+        if suggestion is not None:
+            suggestions.append(Suggestion(sentence.start, end, sentence.text, suggestion.replacement, suggestion.comment, suggestion.measures))
+    return fixes, suggestions
 
 
 async def answer(sentence: str, paragraph: str, question: str, goal: str) -> Answer:
@@ -304,14 +346,18 @@ async def answer(sentence: str, paragraph: str, question: str, goal: str) -> Ans
     return Answer(ranked[0][2], measures, meta["scope"])
 
 
-async def revise(sentence: str, comment: str, reply: str) -> str | None:
-    """`sentence` rewritten as the writer's `reply` to the coworker's `comment` asks, when Jev says the writer wants a change and the rewrite does it, keeps every fact and the voice."""
+async def revise(sentence: str, comment: str, reply: str, proposed: str = "") -> str | None:
+    """`sentence` rewritten as the writer's `reply` to the coworker's `comment` asks, when Jev says the writer wants a change and the rewrite does it, keeps every fact and the voice.
+
+    `proposed` is a rewrite the comment already showed (a goal suggestion); it is checked instead of a fresh one, so the writer gets the text they saw.
+    """
     Wants = create_model(
         "Wants",
         __doc__=f"A coworker commented on a writer's sentence. Sentence: '{sentence}'. Comment: '{comment}'. The writer replied: '{reply}'.",
         wants_change=(YesNo, Field(description="Does the writer's reply ask for the sentence to be changed?")),
     )
-    wants, replacement = await asyncio.gather(run(Wants, f"Reply: {reply}"), generator.revise(sentence, comment, reply))
+    rewrite = asyncio.sleep(0, proposed) if proposed else generator.revise(sentence, comment, reply)
+    wants, replacement = await asyncio.gather(run(Wants, f"Reply: {reply}"), rewrite)
     if wants["wants_change"] < NOTE_GATE:
         return None
     ReviseCheck = create_model(
