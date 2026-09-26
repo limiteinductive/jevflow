@@ -596,7 +596,7 @@ async function findNotes() {
   liftNotes();
   render();
   rescoreProbes();
-  if (timing.mid_thought < 0.5) refSpans(editor.value, REF_SPAN).filter((span) => !handledRefs.has(span.text)).forEach(handleRef);
+  if (result.timing.mid_thought < 0.5) refSpans(editor.value, REF_SPAN).filter((span) => !handledRefs.has(span.text)).forEach(handleRef);
   if ([currentGoal(), latestHeader("audience"), latestHeader("tone")].join("\n") !== gaugeBrief) refreshGauges();
   if (editor.value !== text) insightsTimer = setTimeout(findInsights, 300);
 }
