@@ -834,7 +834,7 @@ function liftNotes() {
     headers.push(...note.headers);
   }
   if (ready.length) insights = [];
-  if (thread && thread.answer !== undefined && !thread.reply && /\n[^\n]*[.!?\n]/.test(editor.value.slice(thread.anchor.end, typingStart()))) thread = null;
+  if (thread && thread.answer !== undefined && !thread.reply && /\n[^\n]*\w[^\n]*[.!?\n]/.test(editor.value.slice(thread.anchor.end, typingStart()).replace(REF_SPAN, ""))) thread = null;
 }
 
 async function findNotes() {
