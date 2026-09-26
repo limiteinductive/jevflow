@@ -227,12 +227,12 @@ async def decide_note(sentence: str, comment: str, goal: str, enabled: frozenset
     if gate.get("reply", 0) >= NOTE_GATE:
         feed.act(gate, "applied", "reply")
         return SentenceNote(sentence, gate["reply"], "reply", [])
+    new_page = gate.get("new_piece", 0)
     searches = max(gate["find_page"], gate["open_page"])
-    if searches >= NOTE_GATE:
+    if searches >= NOTE_GATE and new_page < NOTE_GATE:
         feed.act(gate, "applied", "find_page", "open_page")
         return SentenceNote(sentence, searches, "open" if gate["open_page"] >= gate["find_page"] else "find", [])
     asks = min(gate["asks"], gate["is_question"])
-    new_page = gate.get("new_piece", 0)
     field = "new_page" if new_page >= NOTE_GATE else "question" if asks >= NOTE_GATE else gate["field"]
     probability = max(gate["plan"], asks, new_page)
     if probability < NOTE_GATE:
