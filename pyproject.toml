@@ -10,3 +10,6 @@ dependencies = [
     "httpx>=0.28.0",
     "pydantic-ai-slim[typesafe]>=2.46.0",
 ]
+
+[tool.uv]
+exclude-newer = "2026-09-20T00:00:00Z"
