@@ -1334,7 +1334,7 @@ editor.addEventListener("input", () => {
   clearTimeout(notesTimer);
   clearTimeout(insightsTimer);
   clearTimeout(fixesTimer);
-  notesTimer = setTimeout(() => { findNotes(); retitle(); }, 600);
+  notesTimer = setTimeout(() => { findNotes(); retitle(); sortComponents(); }, 600);
   insightsTimer = setTimeout(findInsights, 900);
   fixesTimer = setTimeout(findFixes, 900);
   render();
@@ -1524,11 +1524,22 @@ const COLLAPSED_KEY = "jevflow.componentsCollapsed";
 const componentsPanel = document.getElementById("components-panel");
 const componentsHeader = componentsPanel.querySelector("h3");
 const componentList = document.getElementById("component-list");
-let markedRow = null, outlinedFrames = [];
+let markedRow = null, outlinedFrames = [], componentUses = {};
 try { componentsPanel.classList.toggle("collapsed", localStorage.getItem(COLLAPSED_KEY) === "true"); } catch {}
 
+function componentOrder(uses) {
+  return Object.keys(components).sort((first, second) => (uses[second] || 0) - (uses[first] || 0));
+}
+
 function renderComponents() {
-  componentList.innerHTML = Object.entries(components).map(([name, does]) => `<li data-ref="component:${attribute(name)}" data-ref-data="${attribute(does)}" class="${isOn(name) ? "" : "off"}" title="${attribute(does)}">${escape(name)}</li>`).join("");
+  componentList.innerHTML = componentOrder(componentUses).map((name) => `<li data-ref="component:${attribute(name)}" data-ref-data="${attribute(components[name])}" class="${isOn(name) ? "" : "off"}" title="${attribute(components[name])}">${escape(name)}</li>`).join("");
+}
+
+async function sortComponents() {
+  const uses = await (await fetch("/feed/uses")).json();
+  if (componentsPanel.matches(":hover") || componentOrder(uses).join() === componentOrder(componentUses).join()) return;
+  componentUses = uses;
+  renderComponents();
 }
 
 function componentMark(name) {

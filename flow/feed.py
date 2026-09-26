@@ -9,7 +9,7 @@ import contextvars
 import itertools
 import statistics
 import time
-from collections import deque
+from collections import Counter, deque
 from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Literal
 
@@ -82,6 +82,8 @@ decisions = 0
 """Jev questions answered since the server started, across every Jev request."""
 replays = 0
 """Questions replayed from a cache since the server started; not in `decisions`."""
+uses: Counter[ComponentName] = Counter()
+"""Applied and shown actions per component since the server started; the panel sorts its rows by it."""
 input_tokens = 0
 began = time.perf_counter()
 router = APIRouter()
@@ -141,7 +143,14 @@ def act(answers: dict[str, float | str], action: Action, *decisive: str, compone
                 if question.name in decisive:
                     question.action, question.component = action, component
             kept.action, kept.decisive, kept.version = action, list(decisive), next(versions)
+            if component and action in ("applied", "shown"):
+                uses[component] += 1
             return
+
+
+@router.get("/feed/uses")
+async def component_uses() -> dict[str, int]:
+    return uses
 
 
 @router.get("/feed")
