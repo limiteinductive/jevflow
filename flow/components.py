@@ -32,8 +32,9 @@ router = APIRouter()
 
 def context(enabled: frozenset[str]) -> str:
     """The components and their on/off state, as lines that prefix the coworker's reply prompt."""
-    lines = "".join(f"- {name} ({'on' if name in enabled else 'off'}): {does}\n" for name, does in COMPONENTS.items())
-    return f"Your features:\n{lines}"
+    on = "; ".join(f"{name}: {does}" for name, does in COMPONENTS.items() if name in enabled)
+    off = ", ".join(name for name in COMPONENTS if name not in enabled) or "none"
+    return f"Your features that are on: {on}\nYour features that are off: {off}\n"
 
 
 @router.get("/components")

@@ -68,6 +68,11 @@ ANSWER_EXAMPLES = [
         "Goal: an x post\nParagraph: our smol team shipped it anyway\nLast sentence: our smol team shipped it anyway\nQuestion: does this land?",
         "lands. \"smol\" sells the joke, leaving it as is.",
     ),
+    (
+        "Your features that are on: notes: files what you say about the draft as headers; replies: answers your questions in the margin; gauges: scores the draft for your Goal\nYour features that are off: corrections, reactions\n"
+        "Goal: a cover letter\nParagraph: I led the migration to Postgres.\nLast sentence: I led the migration to Postgres.\nQuestion: what can you do?",
+        "i file your notes up top, answer you here and score it for your goal. corrections and reactions are off, just ask to turn them on.",
+    ),
 ]
 REVISE_INSTRUCTIONS = (
     "Rewrite the writer's sentence to do what the writer's reply asks, following the coworker's comment where the reply agrees with it. "
