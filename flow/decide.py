@@ -203,9 +203,10 @@ async def decide_fix(sentence: str) -> str | None:
         same_voice=(YesNo, Field(description="Does the correction still sound like the writer?")),
         small=(YesNo, Field(description="Does the correction only fix mistakes, changing as few words as possible?")),
         real_mistake=(YesNo, Field(description="Does the correction fix a real mistake in the sentence?")),
+        on_purpose=(YesNo, Field(description="Does the correction change a spelling or word the writer chose on purpose, for voice or a joke (like 'akshually' or 'gonna')?")),
     )
     check = await run(FixCheck, f"Sentence: {sentence}\n\nCorrection: {replacement}")
-    return replacement if min(check.values()) >= FIX_THRESHOLD else None
+    return replacement if min(check["keeps_meaning"], check["same_voice"], check["small"], check["real_mistake"], 1 - check["on_purpose"]) >= FIX_THRESHOLD else None
 
 
 async def find_fixes(text: str, limit: int) -> list[Fix]:
