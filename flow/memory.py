@@ -154,18 +154,20 @@ def state() -> dict:
 
 
 async def store(file: str, keywords: list[str], fact: str, gates: dict[str, str], message: str) -> None:
-    """Adds `fact` to `file` when every question in `gates` reaches `KEEP_THRESHOLD`, skipping a fact already stored and replacing every stored fact it contradicts.
+    """Adds `fact` to `file` when every question in `gates` reaches `KEEP_THRESHOLD`, skipping a fact any file already holds and replacing every fact in `file` it contradicts.
 
     Jev answers the gates, duplicate and contradiction questions in one payload.
     """
     async with writes:
         aliases, lines = read(file)
+        stored = [stored_fact.text for stored_file in files() for stored_fact in facts(stored_file)]
         fields = {name: (decide.YesNo, Field(description=question)) for name, question in gates.items()}
-        for index, line in enumerate(lines):
+        for index, line in enumerate(stored):
             fields[f"same_{index}"] = (decide.YesNo, Field(description=f"Does the stored fact '{line}' already say that {fact}?"))
+        for index, line in enumerate(lines):
             fields[f"contradicts_{index}"] = (decide.YesNo, Field(description=f"Does the new fact '{fact}' contradict the stored fact '{line}'?"))
         check = await decide.run(create_model("Store", __doc__="jevflow keeps dated facts about the writer it works with.", **fields), f"New fact: {fact}")
-        if min(check[name] for name in gates) < KEEP_THRESHOLD or any(check[f"same_{index}"] >= KEEP_THRESHOLD for index in range(len(lines))):
+        if min(check[name] for name in gates) < KEEP_THRESHOLD or any(check[f"same_{index}"] >= KEEP_THRESHOLD for index in range(len(stored))):
             return
         kept = [line for index, line in enumerate(lines) if check[f"contradicts_{index}"] < KEEP_THRESHOLD]
         corrected = "corrected" if len(kept) < len(lines) else "stated"
