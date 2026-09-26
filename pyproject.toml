@@ -1,0 +1,12 @@
+[project]
+name = "jevflow"
+version = "0.1.0"
+description = "Real-time writing assistant that keeps you in the flow."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0,<0.54",
+    "httpx>=0.28.0",
+    "pydantic-ai-slim[typesafe]>=2.46.0",
+]

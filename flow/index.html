@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flow</title>
+<style>
+  :root { --ink: #1c1c1e; --faint: #8e8e96; --note: #9a9aa2; --note-bg: #f0f0f3; --paper: #fbfbfa; --style: 214, 120, 40; --ask-bg: #fff6ea; --ask-ink: #8a4b12; --fix: 60, 150, 90; --thread: 60, 110, 220; --card-bg: #ffffff; --card-edge: #e3e3e8; }
+  @media (prefers-color-scheme: dark) {
+    :root { --ink: #e8e8ea; --faint: #6e6e76; --note: #74747c; --note-bg: #26262a; --paper: #151517; --style: 230, 150, 70; --ask-bg: #2b2117; --ask-ink: #f0b477; --fix: 90, 190, 120; --thread: 110, 160, 255; --card-bg: #1f1f23; --card-edge: #34343a; }
+  }
+  html, body { margin: 0; min-height: 100%; background: var(--paper); color: var(--ink); }
+  .page { max-width: 44rem; margin: 0 auto; padding: 8vh 16px 30vh; }
+  #headers { font: 14px/1.5 -apple-system, "Helvetica Neue", sans-serif; color: var(--faint); margin-bottom: 2.4rem; min-height: 1.5em; }
+  #headers div { margin: 0.1rem 0; }
+  #headers b { color: var(--ink); font-weight: 600; margin-right: 0.4rem; }
+  .sheet { position: relative; }
+  .layer {
+    font: 20px/2.1 "Iowan Old Style", "Palatino", Georgia, serif;
+    white-space: pre-wrap; overflow-wrap: break-word; padding: 0; margin: 0; border: 0; width: 100%; box-sizing: border-box;
+  }
+  #backdrop { position: absolute; inset: 0; pointer-events: none; color: var(--ink); }
+  #editor { position: relative; background: transparent; color: transparent; caret-color: var(--ink); outline: none; resize: none; min-height: 60vh; overflow: hidden; display: block; }
+  #editor::placeholder { color: var(--faint); }
+  .note { color: var(--note); background: var(--note-bg); border-radius: 3px; }
+  .flag { border-radius: 3px; }
+  .fixed { border-radius: 3px; background: rgba(var(--fix), 0.3); }
+  #asks { position: absolute; inset: 0; pointer-events: none; }
+  .anchor { border-bottom: 2px solid rgba(var(--thread), 0.7); background: rgba(var(--thread), 0.08); }
+  #comments { position: absolute; top: 0; left: calc(100% + 28px); width: 16rem; }
+  .card {
+    position: absolute; left: 0; right: 0; background: var(--card-bg); border: 1px solid var(--card-edge); border-left: 3px solid rgb(var(--thread));
+    border-radius: 8px; padding: 8px 10px; font: 13px/1.4 -apple-system, "Helvetica Neue", sans-serif; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08); transition: opacity 0.6s;
+  }
+  .card p { margin: 0 0 6px; }
+  .card p:last-child { margin-bottom: 0; }
+  .card b { font-weight: 600; margin-right: 0.35rem; }
+  .card .coworker b { color: rgb(var(--thread)); }
+  .card .status { color: var(--faint); font-size: 11.5px; }
+  .ask {
+    position: absolute; transform: translateY(-100%); font: 11.5px/1.25 -apple-system, "Helvetica Neue", sans-serif;
+    background: var(--ask-bg); color: var(--ask-ink); padding: 1px 7px; border-radius: 5px; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+  }
+  .ask small { opacity: 0.7; margin-left: 0.4rem; }
+</style>
+</head>
+<body>
+<div class="page">
+  <div id="headers"></div>
+  <div class="sheet">
+    <div id="backdrop" class="layer" aria-hidden="true"></div>
+    <textarea id="editor" class="layer" spellcheck="false" autofocus placeholder="Just write. Say what you're writing, who it's for and what to fix, all inline."></textarea>
+    <div id="asks"></div>
+    <div id="comments"></div>
+  </div>
+</div>
+<script>
+const FIELDS = { goal: "Goal", audience: "Audience", tone: "Tone", to_do: "To do" };
+const MAX_OPEN_QUESTIONS = 3;
+const FLASH_MS = 1200;
+const editor = document.getElementById("editor");
+const backdrop = document.getElementById("backdrop");
+const asksLayer = document.getElementById("asks");
+const headersBox = document.getElementById("headers");
+const commentsLayer = document.getElementById("comments");
+const THREAD_FADE_SENTENCES = 2;
+let thread = null;
+let notes = [], insights = [], headers = [], history = [], flashes = [];
+const declined = new Set();
+let notesTimer, insightsTimer, fixesTimer, notesRequest = 0, insightsRequest = 0, fixesRequest = 0;
+
+const escape = (text) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+function typingStart() {
+  const before = editor.value.slice(0, editor.selectionStart);
+  const match = before.match(/[\s\S]*[.!?\n]/);
+  return match ? match[0].length : 0;
+}
+
+function stillThere(item) {
+  return editor.value.slice(item.start, item.end) === item.text;
+}
+
+function openQuestions() {
+  const limit = typingStart();
+  return insights.filter((insight) => insight.ask && insight.end <= limit && stillThere(insight))
+    .sort((first, second) => second.probability - first.probability).slice(0, MAX_OPEN_QUESTIONS);
+}
+
+function relocate(item) {
+  if (stillThere(item)) return;
+  const start = editor.value.indexOf(item.text);
+  if (start >= 0) Object.assign(item, { start, end: start + item.text.length });
+}
+
+function render() {
+  const text = editor.value;
+  if (thread) relocate(thread.anchor);
+  const marks = [];
+  if (thread && stillThere(thread.anchor)) marks.push({ start: thread.anchor.start, end: thread.anchor.end, open: '<span class="anchor" data-thread="1">' });
+  for (const flash of flashes.filter(stillThere)) marks.push({ start: flash.start, end: flash.end, open: '<span class="fixed">' });
+  for (const note of notes.filter(stillThere)) {
+    if (marks.some((mark) => mark.start < note.end && note.start < mark.end)) continue;
+    marks.push({ start: note.start, end: note.end, open: '<span class="note">' });
+  }
+  for (const insight of insights.filter(stillThere)) {
+    if (marks.some((mark) => mark.start < insight.end && insight.start < mark.end)) continue;
+    const alpha = (0.06 + 0.28 * (insight.probability - 0.5) * 2).toFixed(2);
+    marks.push({ start: insight.start, end: insight.end, open: `<span class="flag" data-insight="${insight.start}" style="background: rgba(var(--style), ${alpha})">` });
+  }
+  marks.sort((first, second) => first.start - second.start);
+  let html = "", cursor = 0;
+  for (const mark of marks) {
+    if (mark.start < cursor) continue;
+    html += escape(text.slice(cursor, mark.start)) + mark.open + escape(text.slice(mark.start, mark.end)) + "</span>";
+    cursor = mark.end;
+  }
+  backdrop.innerHTML = html + escape(text.slice(cursor)) + "​";
+  editor.style.height = "auto";
+  editor.style.height = Math.max(editor.scrollHeight, backdrop.scrollHeight) + "px";
+  const sheet = asksLayer.getBoundingClientRect();
+  asksLayer.innerHTML = "";
+  for (const insight of openQuestions()) {
+    const span = backdrop.querySelector(`[data-insight="${insight.start}"]`);
+    if (!span) continue;
+    const first = span.getClientRects()[0];
+    const label = document.createElement("div");
+    label.className = "ask";
+    label.innerHTML = `${escape(insight.ask)}<small>${escape(insight.reasons.join(" · "))}</small>`;
+    label.style.top = `${first.top - sheet.top + 2}px`;
+    asksLayer.appendChild(label);
+    label.style.left = `${Math.max(0, Math.min(first.left - sheet.left, sheet.width - label.offsetWidth))}px`;
+  }
+  renderThread(sheet);
+  headersBox.innerHTML = Object.entries(FIELDS).map(([field, name]) => {
+    const entries = headers.filter((header) => header.field === field).map((header) => escape(header.text));
+    return entries.length ? `<div><b>${name}:</b>${entries.join("; ")}</div>` : "";
+  }).join("");
+}
+
+function renderThread(sheet) {
+  commentsLayer.innerHTML = "";
+  if (!thread) return;
+  const span = backdrop.querySelector("[data-thread]");
+  if (!span) return;
+  const card = document.createElement("div");
+  card.className = "card";
+  const lines = [`<p><b>You</b>${escape(thread.question)}</p>`];
+  lines.push(`<p class="coworker"><b>Jev</b>${thread.answer === undefined ? '<span class="status">thinking…</span>' : escape(thread.answer)}</p>`);
+  if (thread.reply) lines.push(`<p><b>You</b>${escape(thread.reply)}</p>`);
+  if (thread.status) lines.push(`<p class="status">${escape(thread.status)}</p>`);
+  card.innerHTML = lines.join("");
+  card.style.top = `${span.getClientRects()[0].top - sheet.top - 4}px`;
+  commentsLayer.appendChild(card);
+}
+
+function previousSentence(text, position) {
+  const before = text.slice(0, position).trimEnd();
+  const boundary = before.slice(0, -1).search(/[.!?\n][^.!?\n]*$/);
+  let start = boundary + 1;
+  while (/\s/.test(before[start] || "")) start += 1;
+  return { start, end: before.length, text: before.slice(start) };
+}
+
+function sentencesAfter(position) {
+  return (editor.value.slice(position, typingStart()).match(/[.!?\n]/g) || []).length;
+}
+
+async function openThread(anchor, question) {
+  thread = { anchor, question };
+  const goal = headers.find((header) => header.field === "goal");
+  const opened = thread;
+  const result = await post("/answer", { sentence: anchor.text, question, goal: goal ? goal.text : "" });
+  if (thread !== opened) return;
+  thread.answer = result.answer;
+  render();
+}
+
+async function replyToThread(reply) {
+  const replied = thread;
+  thread.reply = reply;
+  thread.status = "Rewriting…";
+  render();
+  const result = await post("/revise", { sentence: thread.anchor.text, comment: thread.answer });
+  if (thread !== replied) return;
+  if (!result.replacement || !stillThere(thread.anchor)) {
+    thread.status = "Kept your sentence: the rewrite did not pass Jev's check.";
+    render();
+    return;
+  }
+  const { start, end } = thread.anchor;
+  applyEdit(start, end, result.replacement, `revise ${thread.anchor.text} ${result.replacement}`);
+  thread.anchor = { start, end: start + result.replacement.length, text: result.replacement };
+  thread.status = "Applied. Cmd+Z or type undo to revert.";
+  const flash = { ...thread.anchor };
+  flashes.push(flash);
+  setTimeout(() => { flashes = flashes.filter((other) => other !== flash); render(); }, FLASH_MS);
+  render();
+}
+
+async function post(path, body) {
+  const response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  return response.json();
+}
+
+function replaceAll(text, caret) {
+  editor.focus();
+  editor.select();
+  document.execCommand("insertText", false, text);
+  editor.setSelectionRange(caret, caret);
+}
+
+function applyEdit(start, end, replacement, key) {
+  const before = editor.value;
+  history.push({ text: before, headers: headers.slice(), key });
+  const caret = editor.selectionStart;
+  const shift = replacement.length - (end - start);
+  replaceAll(before.slice(0, start) + replacement + before.slice(end), caret >= end ? caret + shift : caret);
+}
+
+function undo() {
+  const previous = history.pop();
+  if (!previous) return;
+  declined.add(previous.key);
+  headers = previous.headers;
+  replaceAll(previous.text, previous.text.length);
+}
+
+function removalRange(text, note) {
+  let start = note.start, end = note.end;
+  const before = text.slice(0, start).trimEnd();
+  if (before === "" || /[.!?\n]$/.test(before)) {
+    if (/[.!?]/.test(text[end] || "")) end += 1;
+    while (text[end] === " ") end += 1;
+    if (text[end] === "\n" && (start === 0 || text[start - 1] === "\n")) end += 1;
+    return [start, end];
+  }
+  while (start > 0 && text[start - 1] === " ") start -= 1;
+  return [start, end];
+}
+
+function liftNotes() {
+  const limit = typingStart();
+  const ready = notes.filter((note) => stillThere(note) && note.end <= limit && !declined.has(`note ${note.text}`)).sort((first, second) => second.start - first.start);
+  for (const note of ready) {
+    notes = notes.filter((other) => other !== note);
+    if (note.field === "question" || note.field === "reply") {
+      const anchor = previousSentence(editor.value, note.start);
+      const [start, end] = removalRange(editor.value, note);
+      applyEdit(start, end, "", `note ${note.text}`);
+      if (note.field === "reply" && thread && thread.answer) replyToThread(note.text);
+      else if (note.field === "question" && anchor.text) openThread(anchor, note.text);
+      continue;
+    }
+    if (note.field === "undo") {
+      const [start, end] = removalRange(editor.value, note);
+      replaceAll(editor.value.slice(0, start) + editor.value.slice(end), start);
+      undo();
+      continue;
+    }
+    const [start, end] = removalRange(editor.value, note);
+    applyEdit(start, end, "", `note ${note.text}`);
+    headers.push({ field: note.field, text: note.header });
+  }
+  if (ready.length) insights = [];
+  if (thread && thread.answer !== undefined && !thread.reply && sentencesAfter(thread.anchor.end) >= THREAD_FADE_SENTENCES) thread = null;
+}
+
+async function findNotes() {
+  const text = editor.value;
+  if (!text.trim()) return;
+  const request = ++notesRequest;
+  const comment = thread && thread.answer && !thread.reply ? thread.answer : "";
+  const result = await post("/notes", { text, comment });
+  if (request !== notesRequest || editor.value !== text) return;
+  notes = result.notes;
+  liftNotes();
+  render();
+  if (editor.value !== text) insightsTimer = setTimeout(findInsights, 300);
+}
+
+async function findFixes() {
+  const text = editor.value;
+  const limit = typingStart();
+  if (!text.slice(0, limit).trim()) return;
+  const request = ++fixesRequest;
+  const result = await post("/fixes", { text, limit });
+  if (request !== fixesRequest || editor.value !== text) return;
+  const clear = result.fixes.filter((fix) => !declined.has(`fix ${fix.text} ${fix.replacement}`) && !notes.some((note) => note.start < fix.end && fix.start < note.end));
+  for (const fix of clear.sort((first, second) => second.start - first.start)) {
+    applyEdit(fix.start, fix.end, fix.replacement, `fix ${fix.text} ${fix.replacement}`);
+    const flash = { start: fix.start, end: fix.start + fix.replacement.length, text: fix.replacement };
+    flashes.push(flash);
+    setTimeout(() => { flashes = flashes.filter((other) => other !== flash); render(); }, FLASH_MS);
+  }
+  render();
+}
+
+async function findInsights() {
+  const text = editor.value;
+  if (!text.trim()) return;
+  const request = ++insightsRequest;
+  const result = await post("/insights", { text });
+  if (request !== insightsRequest || editor.value !== text) return;
+  insights = result.insights.map((insight) => ({ ...insight, text: text.slice(insight.start, insight.end) }));
+  render();
+}
+
+editor.addEventListener("input", () => {
+  render();
+  clearTimeout(notesTimer);
+  clearTimeout(insightsTimer);
+  clearTimeout(fixesTimer);
+  notesTimer = setTimeout(findNotes, 600);
+  insightsTimer = setTimeout(findInsights, 900);
+  fixesTimer = setTimeout(findFixes, 900);
+});
+editor.addEventListener("keydown", (event) => {
+  if (event.key === "z" && (event.metaKey || event.ctrlKey) && !event.shiftKey && history.length) {
+    event.preventDefault();
+    undo();
+    render();
+  }
+});
+["click", "keyup", "scroll"].forEach((name) => editor.addEventListener(name, render));
+window.addEventListener("resize", render);
+render();
+</script>
+</body>
+</html>
