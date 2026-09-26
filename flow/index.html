@@ -1269,13 +1269,16 @@ function loadPage(id, state) {
   notes = []; insights = []; reactions = []; flashes = []; history = []; pendingFixes = []; pendingSuggestions = []; gauges = []; gaugeLimit = null;
   declined.clear();
   render();
-  const [start, end] = (readPages()[id]?.caret || [state.text.length, state.text.length]).map((offset) => Math.min(offset, state.text.length));
+  const stored = readPages()[id];
+  const [start, end] = (stored?.caret || [state.text.length, state.text.length]).map((offset) => Math.min(offset, state.text.length));
   editor.focus({ preventScroll: true });
   editor.setSelectionRange(start, end);
   const rect = characterRect(Math.max(0, Math.min(start, state.text.length - 1)));
   if (rect) window.scrollBy(0, rect.top - window.innerHeight / 2);
-  lastSaved = "";
+  lastSaved = stored ? pageState() : "";
   savePage();
+  try { localStorage.setItem(CURRENT_PAGE_KEY, id); } catch {}
+  renderPages(readPages());
   refreshGauges();
 }
 
