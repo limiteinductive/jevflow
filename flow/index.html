@@ -580,7 +580,9 @@ async function openThread(anchor, question) {
   const opened = thread;
   const paragraphStart = editor.value.lastIndexOf("\n", anchor.start - 1) + 1;
   const paragraph = { start: paragraphStart, end: anchor.end, text: editor.value.slice(paragraphStart, anchor.end) };
-  const result = await post("/answer", { sentence: anchor.text, paragraph: paragraph.text, question, goal: goal ? goal.text : "", disabled: [...disabled] });
+  const content = contentText();
+  const plain = (start, end) => content.slice(start, end).replace(/\s+/g, " ").trim();
+  const result = await post("/answer", { sentence: plain(anchor.start, anchor.end), paragraph: plain(paragraphStart, anchor.end), question, goal: goal ? goal.text : "", disabled: [...disabled] });
   if (thread !== opened) return;
   if (result.scope === "paragraph") thread.anchor = paragraph;
   thread.answer = result.text;
