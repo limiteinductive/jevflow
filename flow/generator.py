@@ -109,6 +109,22 @@ CLAIM_EXAMPLES = [
     ("btw python was made by linus torvalds in 2005", "btw python was made by guido van rossum in 1991"),
 ]
 
+IDEA_INSTRUCTIONS = (
+    "The writer is stuck on their draft and asks for ideas. Give 2 angles: things they could tell their readers next, such as a moment, a lesson, a detail of their work or a reason. "
+    "Each is a short phrase of 3 to 10 words that points at what to say, not a title and not a sentence of the text. "
+    "Build each from their draft, their Goal and what you know about them, reading every name the way the writer means it. Reply with the 2 lines only."
+)
+IDEA_EXAMPLES = [
+    (
+        "Goal: a linkedin post about starting as a night nurse\nDraft: some news: i started nights at st mary's icu in march",
+        "the first patient who made nights feel worth it\nwhat the 3am handover taught you that school didn't",
+    ),
+    (
+        "Goal: a linkedin post about leaving my bakery job\nDraft: after 8 years i'm hanging up my apron at rise bakery",
+        "the 4am regular you'll miss most\nthe loaf you burned on day one and still think about",
+    ),
+]
+
 mlx = httpx.AsyncClient(base_url=MLX_URL, timeout=30)
 
 
@@ -192,3 +208,9 @@ async def extract_question(sentence: str) -> str:
 async def correct_claims(sentence: str, num_drafts: int) -> list[str]:
     """`num_drafts` sampled rewrites of `sentence` with its wrong facts corrected."""
     return await sample(CLAIM_INSTRUCTIONS, CLAIM_EXAMPLES, sentence, num_drafts, 2 * len(sentence.split()) + 16, 0.8)
+
+
+async def ideas(text: str, goal: str, context: str, num_samples: int) -> list[str]:
+    """Angles from `num_samples` sampled replies, one per line; `context` is `flow.memory.context()`."""
+    replies = await sample(IDEA_INSTRUCTIONS, IDEA_EXAMPLES, f"{context}Goal: {goal}\nDraft: {text}", num_samples, 60, 0.9)
+    return [angle for reply in replies for line in reply.splitlines() if (angle := line.strip("-*• ").strip())]

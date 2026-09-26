@@ -12,7 +12,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, create_model
 from pydantic_ai import Agent
 
-from flow import claims, components, feed, generator, reactions
+from flow import claims, components, feed, generator, ideas, reactions
 from text_processing import Sentence, split_sentences
 
 MODEL = "typesafe:jev-latest"
@@ -55,14 +55,14 @@ NOTE_CONTEXT = "A writer types their text and, in the same stream, notes to a wr
 
 YesNo = Literal["yes", "no"]
 
-NoteField = Literal["new_page", "goal", "audience", "tone", "to_do", "undo", "question", "reply", "find", "open"]
-"""Header fields, plus "undo" (reverts the last edit), "question" (opens a comment thread on the previous sentence), "reply" (answers the open comment), and "find" and "open" (search the writer's other pages, and switch to the page found)."""
+NoteField = Literal["new_page", "goal", "audience", "tone", "to_do", "undo", "question", "reply", "find", "open", "ideas"]
+"""Header fields, plus "undo" (reverts the last edit), "question" (opens a comment thread on the previous sentence), "reply" (answers the open comment), "find" and "open" (search the writer's other pages, and switch to the page found), and "ideas" (asks for angles to write about)."""
 
 Scope = Literal["sentence", "paragraph"]
 
 QuestionKind = Literal["understand", "opinion", "cut_or_keep", "true", "wording", "other"]
 
-ComponentIntent = Literal["yes_no", "question", "instruction", "turn_off", "turn_on", "change", "mention"]
+ComponentIntent = Literal["yes_no", "question", "instruction", "accept", "more", "turn_off", "turn_on", "change", "mention"]
 
 HeaderField = Literal["goal", "audience", "tone", "to_do", "undo"]
 
@@ -220,6 +220,7 @@ async def decide_note(sentence: str, comment: str, goal: str, enabled: frozenset
         **components.fields(),
         **(reactions.fields(goal) if "reactions" in enabled else {}),
         **(claims.fields(goal) if "claims" in enabled else {}),
+        **(ideas.fields() if "ideas" in enabled else {}),
     )
     gate, (note, header), question, audience = await asyncio.gather(
         run(NoteGate, f"Sentence: {sentence}"), generator.extract_note(sentence), generator.extract_question(sentence), generator.extract_audience(sentence)
@@ -234,6 +235,9 @@ async def decide_note(sentence: str, comment: str, goal: str, enabled: frozenset
     if gate.get("reply", 0) >= NOTE_GATE:
         feed.act(gate, "applied", "reply")
         return SentenceNote(sentence, gate["reply"], "reply", [])
+    if gate.get("wants_ideas", 0) >= NOTE_GATE:
+        feed.act(gate, "applied", "wants_ideas")
+        return SentenceNote(sentence, gate["wants_ideas"], "ideas", [])
     searches = max(gate["find_page"], gate["open_page"])
     if searches >= NOTE_GATE:
         feed.act(gate, "applied", "find_page", "open_page")
@@ -528,7 +532,7 @@ async def about_component(span: str, question: str, component: str, text: str, s
         intent=(
             ComponentIntent,
             Field(
-                description="yes_no: they ask a yes or no question about that part; question: they ask an open question about it; instruction: they ask to drop, forget or mark done an item; "
+                description="yes_no: they ask a yes or no question about that part; question: they ask an open question about it; instruction: they ask to drop, forget or mark done an item; accept: they say yes to an item, pick it or take it; more: they ask for more or other items; "
                 "turn_off: they ask to remove, hide or turn off the whole part; turn_on: they ask to bring it back or turn it on; change: they ask to change what it measures or how it works; "
                 "mention: it is part of the text they are writing."
             ),
