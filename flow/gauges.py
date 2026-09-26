@@ -32,6 +32,14 @@ CATEGORY_EXAMPLES = [
     ("Goal: a LinkedIn post\nAudience: recruiters", "strong first line\nconcrete\nhumble\nworth commenting on\neasy to skim\nshows results\nfree of buzzwords\npersonal"),
 ]
 
+CHANGE_INSTRUCTIONS = (
+    "A writer's draft is scored on the listed things, one per line, and the writer comments on the list. Rewrite the list as the comment asks, changing only what it asks for. "
+    "Same format: one per line, each 1 to 4 plain words that finish the sentence 'The text is ...'. Reply with the list only."
+)
+CHANGE_EXAMPLES = [("List:\nfunny\nshort\nrelatable\n\nComment: swap short for surprising", "funny\nsurprising\nrelatable")]
+CHANGE_THRESHOLD = 0.6
+"""A changed list replaces the categories only when both of Jev's checks reach this."""
+
 LIMIT_INSTRUCTIONS = (
     "The user names a kind of text a writer is drafting. If that kind of text has a hard or customary maximum length, "
     "reply with that maximum in characters, as a number only. If it has none, reply with none."
@@ -151,6 +159,47 @@ async def pick(brief: Brief, text: str) -> Pick | None:
     except Exception:
         brief_categories.pop(brief, None)
         raise
+
+
+class CategoryChange(BaseModel):
+    goal: str
+    audience: str
+    tone: str
+    comment: str
+
+
+@router.post("/gauges/change")
+async def change(request: CategoryChange) -> dict:
+    """The categories rewritten as the writer's `comment` asks, applied when Jev says the rewrite does what it asks and keeps the rest; the next /gauges call scores the new ones.
+
+    Also applies to the goal-only brief that corrections read, and drops the brief's cached scores.
+    """
+    brief = Brief(request.goal.strip(), request.audience.strip(), request.tone.strip())
+    if brief not in brief_categories:
+        return {"categories": None}
+    old = await brief_categories[brief]
+    names = [category.name for category in old.categories]
+    reply = await generator.chat(CHANGE_INSTRUCTIONS, CHANGE_EXAMPLES, "List:\n" + "\n".join(names) + f"\n\nComment: {request.comment}", 60)
+    proposed = list(dict.fromkeys(filter(None, (LIST_MARKER.sub("", line).strip().lower() for line in reply.splitlines()))))[:NUM_GAUGES]
+    if not proposed or proposed == names:
+        return {"categories": None}
+    ChangeCheck = create_model(
+        "ChangeCheck",
+        __doc__=f"A writer's draft of {brief.kind()} is scored on: {'; '.join(names)}. The writer commented: '{request.comment}'. The new list: {'; '.join(proposed)}.",
+        follows=(decide.YesNo, Field(description="Does the new list do what the writer's comment asks?")),
+        keeps=(decide.YesNo, Field(description="Does the new list keep every item the comment does not ask to change?")),
+    )
+    check = await decide.run(ChangeCheck, f"Comment: {request.comment}\n\nOld: {'; '.join(names)}\n\nNew: {'; '.join(proposed)}")
+    applied = min(check["follows"], check["keeps"]) >= CHANGE_THRESHOLD
+    feed.act(check, "applied" if applied else "dropped", "follows", "keeps")
+    if not applied:
+        return {"categories": None}
+    changed = Pick([Category(name, f"Is this {brief.goal} {name}?") for name in proposed], old.limit)
+    for key in {brief, Brief(brief.goal, "", "")}:
+        brief_categories[key] = asyncio.create_task(asyncio.sleep(0, changed))
+    for key in [key for key in draft_scores if key[0].goal == brief.goal]:
+        draft_scores.pop(key)
+    return {"categories": proposed}
 
 
 async def categories(goal: str, text: str) -> list[str]:
