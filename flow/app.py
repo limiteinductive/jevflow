@@ -125,6 +125,7 @@ async def notes(draft: CommentedDraft) -> dict:
         "timing": asdict(timing),
         "reactions": [asdict(reaction) for reaction in reactions.find(sentences, draft.goal, found)] if "reactions" in enabled else [],
         "toggles": [asdict(toggle) for toggle in components.find(sentences)],
+        "meta": [{"start": sentence.start, "end": sentence.start + len(sentence.text), "text": sentence.text} for sentence in decide.meta_spans(sentences)],
     }
 
 
