@@ -4,6 +4,7 @@ Every decision is one Jev request with all its questions in one payload.
 """
 
 import asyncio
+import difflib
 import math
 from itertools import pairwise
 from dataclasses import dataclass, replace
@@ -41,7 +42,11 @@ DRAFT_CHECKS = {
 ANSWER_FLOOR = 0.3
 """Below this on "answers the writer's question?" for every draft, the drafts are resampled once."""
 FIX_THRESHOLD = 0.7
-"""Every fix question must reach this; a real spelling fix scores at least 0.90 on all four and an unchanged sentence 0.00 on `real_mistake`."""
+"""A word change is applied when "fixes a real mistake" reaches this and "on purpose" stays below 1 minus it."""
+CHANGE_CONTEXT_WORDS = 3
+LOOK_ALIKE = 0.5
+"""Character similarity at which two words count as spellings of each other: 'have' and 'has' score 0.57, 'french' and 'a' 0."""
+"""Words shown on each side of a change, so Jev reads it in place."""
 HURTS_THRESHOLD = 0.7
 """A sentence gets a goal suggestion when Jev's P(it makes the text less of a Goal category) reaches this."""
 OPTION_INSTRUCTIONS = "A writer asks an open question about a part of their draft. Reply with 2 to 4 short possible answers, one per line, each 1 to 4 plain words. Reply with the list only."
@@ -333,40 +338,92 @@ async def find_notes(text: str, comment: str, breaks: list[int], goal: str, enab
     return notes
 
 
-async def decide_fix(sentence: str, draft: str, goal: str, categories: list[str]) -> tuple[str | None, GoalSuggestion | None]:
-    """The LLM's correction of `sentence` when Jev says it keeps the meaning and the voice, stays small, fixes a real mistake, and does not capitalize a `draft` kept lowercase on purpose.
+@dataclass(frozen=True)
+class Change:
+    start: int
+    end: int
+    """Word positions in the sentence that the change replaces; equal for an insertion."""
+    words: list[str]
+    """The words that replace them; empty for a deletion."""
 
-    Without an accepted correction, one question per Goal category (the gauges' categories) rides in the same request.
+
+def changes(sentence: str, correction: str) -> list[Change]:
+    """The word-level changes that turn `sentence` into `correction`; words are split on single spaces so joining them back keeps the writer's spacing.
+
+    A replacement whose words pair up with look-alike words ('have finish' to 'has finished') is split word by word, so Jev can keep one and drop the other;
+    one that does not ('french second handed' to 'a French second-hand') stays whole.
+    """
+    before, after = sentence.split(" "), correction.split(" ")
+
+    def look_alike(old: str, new: str) -> bool:
+        return difflib.SequenceMatcher(a=old.lower(), b=new.lower()).ratio() >= LOOK_ALIKE
+
+    found = []
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(a=before, b=after, autojunk=False).get_opcodes():
+        if tag == "replace" and i2 - i1 == j2 - j1 and i2 - i1 > 1 and all(map(look_alike, before[i1:i2], after[j1:j2])):
+            found.extend(Change(i1 + offset, i1 + offset + 1, [after[j1 + offset]]) for offset in range(i2 - i1))
+        elif tag != "equal":
+            found.append(Change(i1, i2, after[j1:j2]))
+    return found
+
+
+def describe(words: list[str], change: Change) -> str:
+    """The change as Jev reads it: the passage before and after it, with `CHANGE_CONTEXT_WORDS` of the sentence on each side."""
+    left = " ".join(words[max(0, change.start - CHANGE_CONTEXT_WORDS):change.start])
+    right = " ".join(words[change.end:change.end + CHANGE_CONTEXT_WORDS])
+    old, new = " ".join(words[change.start:change.end]), " ".join(change.words)
+    edit = f"adding '{new}'" if not old else f"removing '{old}'" if not new else f"changing '{old}' to '{new}'"
+    before = " ".join(part for part in (left, old, right) if part)
+    after = " ".join(part for part in (left, new, right) if part)
+    return f"{edit}, so '... {before} ...' reads '... {after} ...',"
+
+
+def apply(words: list[str], kept: list[Change]) -> str:
+    for change in sorted(kept, key=lambda change: change.start, reverse=True):
+        words = words[:change.start] + change.words + words[change.end:]
+    return " ".join(words)
+
+
+async def decide_fix(sentence: str, draft: str, goal: str, categories: list[str]) -> tuple[str | None, GoalSuggestion | None]:
+    """The LLM's correction of `sentence`, keeping only the word changes Jev says fix a real mistake without changing the meaning, and that the writer did not choose on purpose.
+
+    Jev judges every change on its own in one request, so one bad change (a respelled brand) no longer sinks the good ones.
+    A change that only capitalizes is dropped when Jev reads the `draft` as lowercase on purpose.
+    Without an accepted change, one question per Goal category (the gauges' categories) rides in the same request.
     When Jev says the sentence makes the text less of a category, the LLM rewrites it and `revise` gates the rewrite.
     """
-    replacement = await generator.fix(sentence)
-    corrects = replacement not in ("", sentence)
-    if not corrects and not categories:
-        return None, None
+    words = sentence.split(" ")
+    found = changes(sentence, await generator.fix(sentence))
     fields = {}
-    if corrects:
-        fields.update(
-            keeps_meaning=(YesNo, Field(description="Does the correction keep every fact and the meaning of the sentence?")),
-            same_voice=(YesNo, Field(description="Does the correction still sound like the writer?")),
-            small=(YesNo, Field(description="Does the correction change only the words that had mistakes, leaving every other word as the writer wrote it?")),
-            real_mistake=(YesNo, Field(description="Does the correction fix a real mistake in the sentence?")),
-            on_purpose=(YesNo, Field(description="Does the correction change a spelling or word the writer chose on purpose, for voice or a joke (like 'akshually' or 'gonna')?")),
-            lowercase=(YesNo, Field(description="Is the draft written in lowercase on purpose, like casual texting, with sentences starting lowercase?")),
-            capitalizes=(YesNo, Field(description="Does the correction capitalize a letter the sentence had in lowercase?")),
-        )
+    for index, change in enumerate(found):
+        described = describe(words, change)
+        fields[f"fixes_{index}"] = (YesNo, Field(description=f"Does {described} fix a real spelling, grammar or punctuation mistake without changing the meaning?"))
+        fields[f"on_purpose_{index}"] = (YesNo, Field(description=f"Did the writer choose the original words on purpose, for voice, a name or a joke (like 'akshually' or 'gonna'), so {described} would undo it?"))
+    if found:
+        fields["lowercase"] = (YesNo, Field(description="Is the draft written in lowercase on purpose, like casual texting, with sentences starting lowercase?"))
+    if not fields and not categories:
+        return None, None
     fields.update({f"hurts_{index}": (YesNo, Field(description=f"Does the sentence make the text less {category}?")) for index, category in enumerate(categories)})
     context = f"A writer drafting {goal} wrote a sentence." if categories else "A writer wrote a sentence."
-    correction = f" Draft so far: '{draft}'. A writing assistant proposes a correction. Correction: '{replacement}'." if corrects else ""
-    FixCheck = create_model("FixCheck", __doc__=f"{context} Sentence: '{sentence}'.{correction}", **fields)
-    check = await run(FixCheck, f"Sentence: {sentence}" + (f"\n\nCorrection: {replacement}" if corrects else ""))
-    keeps_register = corrects and min(check["lowercase"], check["capitalizes"]) < NOTE_GATE
-    if keeps_register and min(check["keeps_meaning"], check["same_voice"], check["small"], check["real_mistake"], 1 - check["on_purpose"]) >= FIX_THRESHOLD:
-        feed.act(check, "applied", "keeps_meaning", "same_voice", "small", "real_mistake", "on_purpose", "lowercase", "capitalizes")
-        return replacement, None
+    proposed = f" Draft so far: '{draft}'. A writing assistant proposes word changes to fix mistakes." if found else ""
+    FixCheck = create_model("FixCheck", __doc__=f"{context} Sentence: '{sentence}'.{proposed}", **fields)
+    check = await run(FixCheck, f"Sentence: {sentence}")
+
+    def capitalizes_only(change: Change) -> bool:
+        old, new = " ".join(words[change.start:change.end]), " ".join(change.words)
+        return old != new and old.lower() == new.lower()
+
+    kept = [
+        change for index, change in enumerate(found)
+        if check[f"fixes_{index}"] >= FIX_THRESHOLD and check[f"on_purpose_{index}"] < 1 - FIX_THRESHOLD and not (capitalizes_only(change) and check["lowercase"] >= NOTE_GATE)
+    ]
+    if kept:
+        feed.act(check, "applied", *(f"{name}_{found.index(change)}" for change in kept for name in ("fixes", "on_purpose")))
+        return apply(words, kept), None
     hurt = [(check[f"hurts_{index}"], category) for index, category in enumerate(categories) if check[f"hurts_{index}"] >= HURTS_THRESHOLD]
     hurts = [f"hurts_{index}" for index in range(len(categories)) if check[f"hurts_{index}"] >= HURTS_THRESHOLD]
     if not hurt:
-        feed.act(check, "dropped" if corrects else "silent", *check)
+        feed.act(check, "dropped" if found else "silent", *check)
         return None, None
     against = " and ".join(f"'{category}'" for _, category in hurt)
     comment = f"For {goal}, this sentence works against {against}."

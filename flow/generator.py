@@ -28,7 +28,7 @@ AUDIENCE_EXAMPLES = [
 ]
 FIX_INSTRUCTIONS = (
     "Fix every spelling, grammar and punctuation mistake in the user's sentence: typos, doubled or missing letters, wrong words like their or its, "
-    "verb forms, pronoun case and missing hyphens. Change nothing else: keep the writer's words, slang and tone. "
+    "verb forms, pronoun case and missing hyphens. Change nothing else: keep the writer's words, slang and tone, and keep every name and brand spelled as written. "
     "If nothing is wrong, reply with the sentence unchanged. Reply with the sentence only."
 )
 FIX_EXAMPLES = [
@@ -38,6 +38,7 @@ FIX_EXAMPLES = [
     ("I realy hope the demo goes welll tomorow.", "I really hope the demo goes well tomorrow."),
     ("Me and her has wrote the first draft already.", "She and I have written the first draft already."),
     ("We found a second hand bike at the nieghborhood market.", "We found a second-hand bike at the neighborhood market."),
+    ("Snapfolio is dutch photo app, it help creators sell there prints.", "Snapfolio is a Dutch photo app, it helps creators sell their prints."),
     ("gonna grab coffee first, brb", "gonna grab coffee first, brb"),
 ]
 VOICE = (
