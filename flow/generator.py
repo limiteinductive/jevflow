@@ -53,6 +53,10 @@ ANSWER_EXAMPLES = [
         "Goal: a text to my wife\nParagraph: sorry i was short with you this morning, the deploy was a mess\nLast sentence: sorry i was short with you this morning, the deploy was a mess\nQuestion: does this sound ok?",
         "warm, owns it. end on her: \"you didn't deserve that.\" add it?",
     ),
+    (
+        "Goal: an x post\nParagraph: our smol team shipped it anyway\nLast sentence: our smol team shipped it anyway\nQuestion: does this land?",
+        "lands. \"smol\" sells the joke, leaving it as is.",
+    ),
 ]
 REVISE_INSTRUCTIONS = (
     "Rewrite the writer's sentence to do what the writer's reply asks, following the coworker's comment where the reply agrees with it. "
