@@ -14,7 +14,7 @@ from pathlib import Path
 from fastapi import APIRouter
 from pydantic import BaseModel, Field, create_model
 
-from flow import decide, generator
+from flow import decide, feed, generator
 
 ROOT = Path.home() / ".jevflow" / "memory"
 PROFILE = "profile"
@@ -172,9 +172,13 @@ async def store(file: str, keywords: list[str], fact: str, gates: dict[str, str]
         for index, line in enumerate(lines):
             fields[f"contradicts_{index}"] = (decide.YesNo, Field(description=f"Does the new fact '{fact}' contradict the stored fact '{line}'?"))
         check = await decide.run(create_model("Store", __doc__="jevflow keeps dated facts about the writer it works with.", **fields), f"New fact: {fact}")
-        if min(check[name] for name in gates) < KEEP_THRESHOLD or any(check[f"same_{index}"] >= KEEP_THRESHOLD for index in range(len(stored))):
+        failed = [name for name in gates if check[name] < KEEP_THRESHOLD]
+        duplicates = [f"same_{index}" for index in range(len(stored)) if check[f"same_{index}"] >= KEEP_THRESHOLD]
+        if failed or duplicates:
+            feed.act(check, "dropped", *(failed or duplicates))
             return
         kept = [line for index, line in enumerate(lines) if check[f"contradicts_{index}"] < KEEP_THRESHOLD]
+        feed.act(check, "applied", *gates, *(f"contradicts_{index}" for index in range(len(lines)) if check[f"contradicts_{index}"] >= KEEP_THRESHOLD))
         corrected = "corrected" if len(kept) < len(lines) else "stated"
         write(file, aliases + keywords, kept + [f"{fact.rstrip('.')}; {corrected} on {date.today()}."], message)
 
@@ -199,6 +203,8 @@ async def forget(sentence: str) -> None:
         return
     fields = {f"match_{index}": (decide.YesNo, Field(description=f"Is '{fact.text}' what the writer asks to forget?")) for index, fact in enumerate(stored)}
     check = await decide.run(create_model("Forget", __doc__=f"The writer typed: '{sentence}'.", **fields), f"Typed: {sentence}")
+    matches = [name for name in fields if check[name] >= KEEP_THRESHOLD]
+    feed.act(check, "applied" if matches else "dropped", *(matches or fields))
     async with writes:
         for file in dict.fromkeys(fact.file for index, fact in enumerate(stored) if check[f"match_{index}"] >= KEEP_THRESHOLD):
             aliases, lines = read(file)
@@ -237,9 +243,12 @@ async def pause(draft: Draft) -> dict:
     forgets = [sentence for index, sentence in enumerate(fresh) if check[f"forget_{index}"] >= KEEP_THRESHOLD]
     for sentence in forgets:
         spawn(forget(sentence))
-    for index, sentence in enumerate(fresh):
-        if min(check[f"note_{index}"], check[f"lasting_{index}"]) >= KEEP_THRESHOLD and sentence not in forgets:
-            spawn(remember(sentence))
+    lasting = [index for index, sentence in enumerate(fresh) if min(check[f"note_{index}"], check[f"lasting_{index}"]) >= KEEP_THRESHOLD and sentence not in forgets]
+    for index in lasting:
+        spawn(remember(fresh[index]))
+    shown = [f"{kind}_{index}" for index, fact in enumerate(found) if any(recall.fact == fact for recall in recalled) for kind in ("relevant", "applies")]
+    written = [f"forget_{index}" for index, sentence in enumerate(fresh) if sentence in forgets] + [f"{kind}_{index}" for index in lasting for kind in ("note", "lasting")]
+    feed.act(check, "applied" if written else "shown" if shown else "silent", *(written or shown))
     return state() | {"forgets": forgets}
 
 
