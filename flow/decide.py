@@ -325,7 +325,7 @@ async def find_fixes(text: str, limit: int, goal: str, categories: list[str]) ->
     return fixes, suggestions
 
 
-async def answer(sentence: str, paragraph: str, question: str, goal: str) -> Answer:
+async def answer(sentence: str, paragraph: str, question: str, goal: str, memory: str) -> Answer:
     """The coworker's reply to the writer's `question` about `sentence`: the local model drafts `NUM_DRAFTS` in one batch, Jev ranks them on `DRAFT_CHECKS`.
 
     The top-ranked draft is shown unless every draft fails "answers the question"; then the drafts are resampled once.
@@ -341,7 +341,7 @@ async def answer(sentence: str, paragraph: str, question: str, goal: str) -> Ans
     )
     meta_task = asyncio.create_task(run(Meta, f"Paragraph: {paragraph}\n\nLast sentence: {sentence}\n\nQuestion: {question}"))
     for attempt in range(2):
-        drafts = list(dict.fromkeys(await generator.answers(sentence, paragraph, question, goal, NUM_DRAFTS)))
+        drafts = list(dict.fromkeys(await generator.answers(sentence, paragraph, question, goal, NUM_DRAFTS, memory)))
         fields = {
             f"{name}_{index}": (YesNo, Field(description=template.format(draft=draft)))
             for index, draft in enumerate(drafts)
@@ -361,7 +361,7 @@ async def answer(sentence: str, paragraph: str, question: str, goal: str) -> Ans
     return Answer(ranked[0][2], measures, meta["scope"])
 
 
-async def revise(sentence: str, comment: str, reply: str, proposed: str = "") -> str | None:
+async def revise(sentence: str, comment: str, reply: str, proposed: str, memory: str) -> str | None:
     """`sentence` rewritten as the writer's `reply` to the coworker's `comment` asks, when Jev says the writer wants a change and the rewrite does it, keeps every fact and the voice.
 
     `proposed` is a rewrite the comment already showed (a goal suggestion); it is checked instead of a fresh one, so the writer gets the text they saw.
@@ -371,7 +371,7 @@ async def revise(sentence: str, comment: str, reply: str, proposed: str = "") ->
         __doc__=f"A coworker commented on a writer's sentence. Sentence: '{sentence}'. Comment: '{comment}'. The writer replied: '{reply}'.",
         wants_change=(YesNo, Field(description="Does the writer's reply ask for the sentence to be changed?")),
     )
-    rewrite = asyncio.sleep(0, proposed) if proposed else generator.revise(sentence, comment, reply)
+    rewrite = asyncio.sleep(0, proposed) if proposed else generator.revise(sentence, comment, reply, memory)
     wants, replacement = await asyncio.gather(run(Wants, f"Reply: {reply}"), rewrite)
     if wants["wants_change"] < NOTE_GATE:
         return None

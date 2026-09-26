@@ -136,12 +136,19 @@
   }
   .reaction:hover::after { opacity: 1; }
   @keyframes reaction-in { from { opacity: 0; transform: translateY(-20%) scale(0.6); } }
+  #memory { font: 12.5px/1.5 -apple-system, "Helvetica Neue", sans-serif; color: var(--faint); margin: -1.6rem 0 2.4rem; }
+  #memory summary { cursor: pointer; color: var(--ink); font-weight: 600; list-style: none; display: flex; align-items: center; gap: 6px; }
+  #memory ul { margin: 0.3rem 0 0; padding: 0; list-style: none; }
+  #memory li { display: flex; align-items: center; gap: 8px; margin: 2px 0; }
+  #memory .ring { flex: none; width: 12px; height: 12px; border-radius: 50%; background: conic-gradient(rgb(var(--thread)) calc(var(--relevance) * 1turn), var(--card-edge) 0); box-shadow: 0 0 calc(var(--relevance) * 8px) rgba(var(--thread), 0.7); }
+  #memory .idle { background: var(--card-edge); box-shadow: none; }
 </style>
 </head>
 <body>
 <div class="page">
   <div id="headers"></div>
   <div id="gauges"></div>
+  <div id="memory"></div>
   <div class="sheet">
     <div id="backdrop" class="layer" aria-hidden="true"></div>
     <textarea id="editor" class="layer" spellcheck="false" autofocus placeholder="Just write. Say what you're writing, who it's for and what to fix, all inline."></textarea>
@@ -177,7 +184,7 @@ let notes = [], insights = [], headers = [], history = [], flashes = [], reactio
 const declined = new Set();
 let timing = null, pendingFixes = [], pendingSuggestions = [];
 const settled = () => timing !== null && timing.mid_thought < 0.5 && timing.interrupt >= 0.3;
-let gaugesTimer, notesTimer, insightsTimer, fixesTimer, notesRequest = 0, insightsRequest = 0, fixesRequest = 0;
+let gaugesTimer, notesTimer, insightsTimer, fixesTimer, notesRequest = 0, insightsRequest = 0, fixesRequest = 0, memoryRequest = 0;
 
 const escape = (text) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
@@ -394,6 +401,7 @@ function undo() {
   const previous = history.pop();
   if (!previous) return;
   declined.add(previous.key);
+  if (/^(fix|revise) /.test(previous.key)) post("/memory/undo", { draft: headers.map((header) => header.text).concat(editor.value).join("\n"), before: previous.removed, after: previous.inserted }).then(renderMemory);
   headers = previous.headers;
   const text = editor.value;
   const found = text.indexOf(previous.context + previous.inserted, Math.max(0, previous.start - previous.context.length - 200));
@@ -703,7 +711,7 @@ editor.addEventListener("input", () => {
   clearTimeout(insightsTimer);
   clearTimeout(fixesTimer);
   clearTimeout(gaugesTimer);
-  notesTimer = setTimeout(findNotes, 600);
+  notesTimer = setTimeout(() => { findNotes(); findMemory(); }, 600);
   gaugesTimer = setTimeout(refreshGauges, 600);
   insightsTimer = setTimeout(findInsights, 900);
   fixesTimer = setTimeout(findFixes, 900);
@@ -718,6 +726,33 @@ editor.addEventListener("keydown", (event) => {
 });
 ["click", "keyup", "scroll"].forEach((name) => editor.addEventListener(name, render));
 window.addEventListener("resize", render);
+function renderMemory(memory) {
+  const box = document.getElementById("memory");
+  if (!memory.facts.length) { box.innerHTML = ""; return; }
+  const relevance = new Map(memory.recalled.map((recall) => [recall.text, recall.probability]));
+  const ring = (probability) => probability === undefined ? '<span class="ring idle"></span>' : `<span class="ring" style="--relevance: ${probability.toFixed(2)}" title="relevant ${Math.round(100 * probability)}%"></span>`;
+  const items = memory.facts.map((fact) => `<li title="${fact.day}">${ring(relevance.get(fact.text))}${escape(fact.words)}</li>`);
+  const open = box.querySelector("details")?.open ? " open" : "";
+  box.innerHTML = `<details${open}><summary>${memory.recalled.map((recall) => ring(recall.probability)).join("")}What jevflow knows about you</summary><ul>${items.join("")}</ul></details>`;
+}
+
+async function findMemory() {
+  const text = editor.value;
+  if (!text.trim()) return;
+  const request = ++memoryRequest;
+  const memory = await post("/memory/pause", { text });
+  if (request !== memoryRequest) return;
+  for (const sentence of memory.forgets) {
+    const start = editor.value.indexOf(sentence);
+    if (start < 0) continue;
+    const [from, to] = removalRange(editor.value, { start, end: start + sentence.length });
+    replaceAll(editor.value.slice(0, from) + editor.value.slice(to), from);
+  }
+  renderMemory(memory);
+  render();
+}
+
+fetch("/memory").then((response) => response.json()).then(renderMemory);
 render();
 </script>
 </body>
