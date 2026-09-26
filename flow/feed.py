@@ -18,7 +18,8 @@ from pydantic_ai import Agent
 CAPACITY = 400
 PRICE_PER_MILLION_INPUT_TOKENS = 0.042
 
-Kind = Literal["yes/no", "score", "choice"]
+Kind = Literal["score", "choice"]
+"""Only pick-one and rubric fields carry a distribution; a `Literal["yes", "no"]` field is a two-option choice."""
 Action = Literal["shown", "applied", "dropped", "silent"]
 
 
@@ -34,8 +35,8 @@ class Question:
     name: str
     kind: Kind
     text: str
-    answer: float | str
-    """P(yes) for a yes/no question, the level for a score, the chosen option for a choice."""
+    answer: str
+    """The chosen option or level; the likeliest one for a cache replay."""
     distribution: dict[str, float]
 
 
@@ -93,15 +94,15 @@ def record(prompt: str, schema: type[BaseModel], distributions: dict[str, dict[s
     questions = [
         Question(
             name,
-            "yes/no" if "yes" in distribution else "score" if name in scores else "choice",
+            "score" if name in scores else "choice",
             schema.model_fields[name].description or name,
-            distribution["yes"] if "yes" in distribution else getattr(output, name),
+            str(getattr(output, name) if output else max(distribution, key=distribution.get)),
             distribution,
         )
         for name, distribution in distributions.items()
     ]
     current = origin.get(OFFLINE)
-    answers = {question.name: question.answer for question in questions}
+    answers = {name: distribution["yes"] if "yes" in distribution else getattr(output, name) for name, distribution in distributions.items()}
     records.append(Record(next(ids), next(versions), current.pause, current.endpoint, schema.__name__, questions, time.perf_counter() - began - seconds, seconds, tokens, prompt=prompt, cached=output is None, answers=answers))
     if output is None:
         replays += len(questions)

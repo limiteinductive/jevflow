@@ -744,18 +744,19 @@ async function pollFeed() {
 }
 
 const attribute = (text) => escape(text).replace(/"/g, "&quot;");
-const KINDS = { "yes/no": "Noul", score: "Score", choice: "Choice" };
+const KINDS = { score: "Score", choice: "Choice" };
+const yesNo = (question) => "yes" in question.distribution && Object.keys(question.distribution).length === 2;
 
 function glyph(question, probability) {
-  if (question.kind === "yes/no") return `<div class="track"><b style="width: ${100 * probability}%"></b><i class="${probability > 0.4 && probability < 0.6 ? "unsure" : ""}" style="left: ${100 * probability}%"></i></div>`;
+  if (yesNo(question)) return `<div class="track"><b style="width: ${100 * probability}%"></b><i class="${probability > 0.4 && probability < 0.6 ? "unsure" : ""}" style="left: ${100 * probability}%"></i></div>`;
   const options = Object.entries(question.distribution);
   if (question.kind === "score") return `<div class="glyph ruler">${options.map(([level, share]) => `<i class="${level === String(question.answer) ? "pick" : ""}" style="height: ${Math.max(10, 100 * share)}%"></i>`).join("")}</div>`;
   return `<div class="glyph dots">${options.map(([option]) => `<i class="${option === String(question.answer) ? "pick" : ""}" title="${attribute(option)}"></i>`).join("")}</div>`;
 }
 
 function answerBar(question) {
-  const probability = question.kind === "yes/no" ? question.answer : question.distribution[question.answer] || 0;
-  return { probability, option: question.kind === "yes/no" ? "" : String(question.answer) };
+  const probability = yesNo(question) ? question.distribution.yes : question.distribution[question.answer] || 0;
+  return { probability, option: yesNo(question) ? "" : question.answer };
 }
 
 function renderFeed() {
@@ -786,7 +787,7 @@ function renderFeed() {
       const rows = ranked.slice(0, FEED_ROWS).map((question) => {
         const { probability, option } = answerBar(question);
         const key = record.decisive.includes(question.name) ? " key" : "";
-        return `<div class="feed-row${key}${fresh ? " fresh" : ""}" style="--index: ${row++}" title="${attribute(question.text)}" data-ref="decision:${record.id}-${question.name}" data-ref-data="${attribute(question.text)} ${Math.round(100 * probability)}%"><div><span class="key-name">${escape(question.name)}</span><span class="text">${escape(question.text)}</span></div><div class="answer"><span class="value">${question.kind === "yes/no" ? `${Math.round(100 * probability)}% true` : `${escape(option)} ${probability.toFixed(2)}`}</span>${glyph(question, probability)}</div><span class="kind">${KINDS[question.kind]}</span></div>`;
+        return `<div class="feed-row${key}${fresh ? " fresh" : ""}" style="--index: ${row++}" title="${attribute(question.text)}" data-ref="decision:${record.id}-${question.name}" data-ref-data="${attribute(question.text)} ${Math.round(100 * probability)}%"><div><span class="key-name">${escape(question.name)}</span><span class="text">${escape(question.text)}</span></div><div class="answer"><span class="value">${yesNo(question) ? `${Math.round(100 * probability)}% yes` : `${escape(option)} ${probability.toFixed(2)}`}</span>${glyph(question, probability)}</div><span class="kind">${KINDS[question.kind]}</span></div>`;
       }).join("");
       const more = record.questions.length > FEED_ROWS ? `<div class="feed-more">+${record.questions.length - FEED_ROWS} more</div>` : "";
       return `<div data-record="${record.id}" class="feed-call ${record.action || ""}${record.cached ? " cached" : ""}${acted}"><h4><i class="dot ${record.action || "pending"}" title="${record.action || "no action"}"></i><b>${escape(record.endpoint)}</b>${escape(record.schema)} · ${record.questions.length}<span>${record.cached ? "cache" : `${record.seconds.toFixed(2)}s`}</span></h4>${rows}${more}</div>`;
