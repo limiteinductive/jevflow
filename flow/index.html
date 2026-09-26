@@ -43,11 +43,23 @@
     background: var(--ask-bg); color: var(--ask-ink); padding: 1px 7px; border-radius: 5px; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis;
   }
   .ask small { opacity: 0.7; margin-left: 0.4rem; }
+  #gauges { display: flex; flex-wrap: wrap; gap: 14px; margin: -1.6rem 0 2.4rem; font: 11.5px/1.3 -apple-system, "Helvetica Neue", sans-serif; color: var(--faint); }
+  #gauges:empty { display: none; }
+  .gauge { position: relative; width: 64px; text-align: center; }
+  .gauge svg { width: 44px; height: 44px; display: block; margin: 0 auto 2px; transform: rotate(-90deg); }
+  .gauge .track { stroke: var(--card-edge); }
+  .gauge .level { transition: stroke-dashoffset 0.9s ease, stroke 0.9s ease; }
+  .gauge .value { position: absolute; top: 0; left: 0; right: 0; height: 44px; line-height: 44px; color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .gauge .name { display: block; overflow-wrap: break-word; }
+  .gauge:hover::after { content: attr(data-level); position: absolute; top: -20px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--paper); padding: 1px 6px; border-radius: 4px; white-space: nowrap; }
+  .count { align-self: center; font-variant-numeric: tabular-nums; color: var(--ink); }
+  .count.over { color: rgb(200, 60, 50); font-weight: 600; }
 </style>
 </head>
 <body>
 <div class="page">
   <div id="headers"></div>
+  <div id="gauges"></div>
   <div class="sheet">
     <div id="backdrop" class="layer" aria-hidden="true"></div>
     <textarea id="editor" class="layer" spellcheck="false" autofocus placeholder="Just write. Say what you're writing, who it's for and what to fix, all inline."></textarea>
@@ -68,7 +80,7 @@ const THREAD_FADE_SENTENCES = 2;
 let thread = null;
 let notes = [], insights = [], headers = [], history = [], flashes = [];
 const declined = new Set();
-let notesTimer, insightsTimer, fixesTimer, notesRequest = 0, insightsRequest = 0, fixesRequest = 0;
+let gaugesTimer, notesTimer, insightsTimer, fixesTimer, notesRequest = 0, insightsRequest = 0, fixesRequest = 0;
 
 const escape = (text) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
@@ -288,6 +300,7 @@ async function findNotes() {
   notes = result.notes;
   liftNotes();
   render();
+  if (currentGoal() !== gaugeGoal) refreshGauges();
   if (editor.value !== text) insightsTimer = setTimeout(findInsights, 300);
 }
 
@@ -318,11 +331,84 @@ async function findInsights() {
   render();
 }
 
+const gaugesBox = document.getElementById("gauges");
+const GAUGE_LEVELS = [[0.2, "weak"], [0.4, "shaky"], [0.6, "so-so"], [0.8, "good"], [1.01, "strong"]];
+const GAUGE_RING = 2 * Math.PI * 18;
+let gauges = [], gaugeLimit = null, gaugeGoal = "", gaugesRequest = 0;
+
+function currentGoal() {
+  const goals = headers.filter((header) => header.field === "goal");
+  return goals.length ? goals[goals.length - 1].text : "";
+}
+
+function gaugeColor(probability) {
+  return `hsl(${Math.round(120 * probability)}, 55%, 45%)`;
+}
+
+function renderGauges() {
+  if (!currentGoal()) { gaugesBox.innerHTML = ""; return; }
+  for (const gauge of gauges) {
+    let element = gaugesBox.querySelector(`[data-name="${CSS.escape(gauge.name)}"]`);
+    if (!element) {
+      element = document.createElement("div");
+      element.className = "gauge";
+      element.dataset.name = gauge.name;
+      element.innerHTML = `<svg viewBox="0 0 44 44"><circle class="track" cx="22" cy="22" r="18" fill="none" stroke-width="4"/><circle class="level" cx="22" cy="22" r="18" fill="none" stroke-width="4" stroke-linecap="round" stroke-dasharray="${GAUGE_RING}" stroke-dashoffset="${GAUGE_RING}"/></svg><span class="value">0%</span><span class="name">${escape(gauge.name)}</span>`;
+      element.shown = 0;
+      gaugesBox.appendChild(element);
+    }
+    element.dataset.level = GAUGE_LEVELS.find(([ceiling]) => gauge.probability < ceiling)[1];
+    const ring = element.querySelector(".level");
+    requestAnimationFrame(() => {
+      ring.style.strokeDashoffset = `${GAUGE_RING * (1 - gauge.probability)}px`;
+      ring.style.stroke = gaugeColor(gauge.probability);
+    });
+    tweenValue(element, gauge.probability);
+  }
+  for (const element of [...gaugesBox.querySelectorAll(".gauge")]) {
+    if (!gauges.some((gauge) => gauge.name === element.dataset.name)) element.remove();
+  }
+  let count = gaugesBox.querySelector(".count");
+  if (gaugeLimit && !count) { count = document.createElement("div"); count.className = "count"; gaugesBox.appendChild(count); }
+  if (!gaugeLimit && count) count.remove();
+  if (gaugeLimit) {
+    const length = editor.value.trim().length;
+    count.textContent = `${length} / ${gaugeLimit}`;
+    count.classList.toggle("over", length > gaugeLimit);
+  }
+}
+
+function tweenValue(element, target) {
+  const from = element.shown, began = performance.now();
+  const step = (now) => {
+    const progress = Math.min(1, (now - began) / 900);
+    element.shown = from + (target - from) * (1 - Math.pow(1 - progress, 3));
+    element.querySelector(".value").textContent = `${Math.round(100 * element.shown)}%`;
+    if (progress < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
+async function refreshGauges() {
+  const goal = currentGoal(), text = editor.value;
+  if (goal !== gaugeGoal) { gaugeGoal = goal; gauges = []; gaugesBox.innerHTML = ""; }
+  if (!goal || !text.trim()) { renderGauges(); return; }
+  const request = ++gaugesRequest;
+  const result = await post("/gauges", { text, goal });
+  if (request !== gaugesRequest || currentGoal() !== goal) return;
+  gauges = result.gauges;
+  gaugeLimit = result.limit;
+  renderGauges();
+}
+
 editor.addEventListener("input", () => {
+  renderGauges();
   clearTimeout(notesTimer);
   clearTimeout(insightsTimer);
   clearTimeout(fixesTimer);
+  clearTimeout(gaugesTimer);
   notesTimer = setTimeout(findNotes, 600);
+  gaugesTimer = setTimeout(refreshGauges, 600);
   insightsTimer = setTimeout(findInsights, 900);
   fixesTimer = setTimeout(findFixes, 900);
   render();

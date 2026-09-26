@@ -12,7 +12,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from flow import decide
+from flow import decide, gauges
 from mirror.model import Stacker
 from mirror.scan import scan
 
@@ -20,6 +20,7 @@ PORT = 8000
 INSIGHT_THRESHOLD = 0.5
 
 app = FastAPI()
+app.include_router(gauges.router)
 stacker = Stacker.load()
 
 
