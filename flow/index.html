@@ -613,6 +613,11 @@ async function openThread(anchor, question) {
   const plain = (start, end) => content.slice(start, end).replace(/\s+/g, " ").trim();
   const result = await post("/answer", { sentence: plain(anchor.start, anchor.end), paragraph: plain(paragraphStart, anchor.end), question, goal: goal ? goal.text : "", disabled: [...disabled] });
   if (thread !== opened) return;
+  if (!result.text) {
+    thread = null;
+    render();
+    return;
+  }
   if (result.scope === "paragraph") thread.anchor = paragraph;
   thread.answer = result.text;
   thread.measures = result.measures;

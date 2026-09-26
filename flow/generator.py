@@ -49,9 +49,9 @@ VOICE = (
 )
 """The coworker's voice; every prompt whose output the writer reads as the coworker's words starts with it."""
 ANSWER_INSTRUCTIONS = VOICE + (
-    " The writer asks you about what they just wrote: the last sentence, or the whole paragraph if the question is about it. "
-    "Say what a reader of this kind of text might miss, and give one concrete fix. Keep their joke. "
-    "If they ask about you (what you can do, what you are doing), answer from your features and whether each is on."
+    " The writer asks you for something about what they just wrote: feedback, a rewrite, an explanation or ideas. "
+    "Do what they ask about the last sentence, or the whole paragraph if the request is about it. "
+    "For feedback, say what a reader of this kind of text might miss and give one concrete fix. Keep their joke."
 )
 ANSWER_EXAMPLES = [
     (
@@ -70,12 +70,15 @@ ANSWER_EXAMPLES = [
         "Goal: an x post\nParagraph: our smol team shipped it anyway\nLast sentence: our smol team shipped it anyway\nQuestion: does this land?",
         "lands. \"smol\" sells the joke, leaving it as is.",
     ),
+]
+FEATURES_EXAMPLE = (
     (
         "Your features that are on: notes: files what you say about the draft as headers; replies: answers your questions in the margin; gauges: scores the draft for your Goal\nYour features that are off: corrections, reactions\n"
-        "Goal: a cover letter\nParagraph: I led the migration to Postgres.\nLast sentence: I led the migration to Postgres.\nQuestion: what can you do?",
-        "i file your notes up top, answer you here and score it for your goal. corrections and reactions are off, just ask to turn them on.",
+        "Goal: a cover letter\nParagraph: I led the migration to Postgres.\nLast sentence: I led the migration to Postgres.\nQuestion: what can you do?"
     ),
-]
+    "i file your notes up top, answer you here and score it for your goal. corrections and reactions are off, just ask to turn them on.",
+)
+"""Sent after `ANSWER_EXAMPLES` only with the components' on/off state; without them, a memory preamble makes the 4B copy this reply word for word."""
 REVISE_INSTRUCTIONS = (
     "Rewrite the writer's sentence to do what the writer's reply asks, following the coworker's comment where the reply agrees with it. "
     "Keep every fact, the writer's words where possible, their slang and their joke. "
@@ -165,9 +168,10 @@ async def sample(instructions: str, examples: list[tuple[str, str]], text: str, 
     return [undash(choice["text"].strip()) for choice in response.json()["choices"]]
 
 
-async def answers(sentence: str, paragraph: str, question: str, goal: str, count: int, context: str) -> list[str]:
-    """`count` sampled replies; `context` is `flow.memory.context()` and `flow.components.context()`."""
-    return await sample(ANSWER_INSTRUCTIONS, ANSWER_EXAMPLES, f"{context}Goal: {goal}\nParagraph: {paragraph}\nLast sentence: {sentence}\nQuestion: {question}", count, 60, 0.9)
+async def answers(sentence: str, paragraph: str, question: str, goal: str, count: int, memory: str, features: str) -> list[str]:
+    """`count` sampled replies; `memory` is `flow.memory.context()`, `features` is `flow.components.context()` or empty."""
+    examples = [*ANSWER_EXAMPLES, FEATURES_EXAMPLE] if features else ANSWER_EXAMPLES
+    return await sample(ANSWER_INSTRUCTIONS, examples, f"{memory}{features}Goal: {goal}\nParagraph: {paragraph}\nLast sentence: {sentence}\nQuestion: {question}", count, 60, 0.9)
 
 
 async def revise(sentence: str, comment: str, reply: str, memory: str) -> str:
