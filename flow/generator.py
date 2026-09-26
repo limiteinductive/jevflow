@@ -39,7 +39,8 @@ ANSWER_EXAMPLES = [
 ]
 REVISE_INSTRUCTIONS = (
     "Rewrite the writer's sentence to do what the coworker's comment suggests. "
-    "Keep every fact, the writer's words where possible, their slang and their joke. Reply with the rewritten text only."
+    "Keep every fact, the writer's words where possible, their slang and their joke. "
+    "Reply with the rewritten text only, as the writer would send it: no advice, no quotes, no markdown."
 )
 REVISE_EXAMPLES = [
     (
