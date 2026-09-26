@@ -159,7 +159,7 @@ function renderThread(sheet) {
   const card = document.createElement("div");
   card.className = "card";
   const lines = [`<p><b>You</b>${escape(thread.question)}</p>`];
-  const measures = (thread.measures || []).map((measure) => `<span class="measure">Jev · ${escape(measure.label)} ${Math.round(100 * measure.probability)}%</span>`).join("");
+  const measures = (thread.measures || []).map((measure) => `<span class="measure">${escape(measure.label)} ${Math.round(100 * measure.probability)}%</span>`).join("");
   lines.push(`<p class="coworker"><b>jevflow</b>${thread.answer === undefined ? '<span class="status">thinking…</span>' : measures + escape(thread.answer)}</p>`);
   if (thread.reply) lines.push(`<p><b>You</b>${escape(thread.reply)}</p>`);
   if (thread.status) lines.push(`<p class="status">${escape(thread.status)}</p>`);
