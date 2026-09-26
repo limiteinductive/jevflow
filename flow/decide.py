@@ -97,7 +97,7 @@ class Timing:
 class GoalSuggestion:
     replacement: str
     comment: str
-    """Why the sentence should change, such as "For a LinkedIn post, the text should be concrete, and this sentence works against that."."""
+    """Why the sentence should change, such as "For a LinkedIn post, this sentence works against 'concrete'."."""
     measures: list[Measure]
 
 
@@ -273,11 +273,12 @@ async def decide_fix(sentence: str, goal: str, categories: list[str]) -> tuple[s
     hurt = [(check[f"hurts_{index}"], category) for index, category in enumerate(categories) if check[f"hurts_{index}"] >= HURTS_THRESHOLD]
     if not hurt:
         return None, None
-    comment = f"For {goal}, the text should be {' and '.join(category for _, category in hurt)}, and this sentence works against that."
+    against = " and ".join(f"'{category}'" for _, category in hurt)
+    comment = f"For {goal}, this sentence works against {against}."
     rewrite = await revise(sentence, comment, "ok")
     if rewrite is None or rewrite == sentence:
         return None, None
-    return None, GoalSuggestion(rewrite, comment, [Measure(f"works against '{category}'", probability) for probability, category in hurt])
+    return None, GoalSuggestion(rewrite, comment, [Measure(category, 1 - probability) for probability, category in hurt])
 
 
 async def find_fixes(text: str, limit: int, goal: str, categories: list[str]) -> tuple[list[Fix], list[Suggestion]]:
