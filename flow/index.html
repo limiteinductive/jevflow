@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Flow</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   :root { --feed-width: 372px; --feed-bg: rgba(250, 250, 252, 0.86); --track: rgba(120, 120, 130, 0.16); --applied: 52, 168, 96; --shown: 64, 118, 232; --dropped: 214, 76, 64; --silent: 150, 150, 160; }
   @media (prefers-color-scheme: dark) { :root { --feed-bg: rgba(22, 22, 26, 0.86); --track: rgba(200, 200, 210, 0.12); --applied: 88, 200, 124; --shown: 110, 160, 255; --dropped: 240, 110, 96; --silent: 120, 120, 130; } }
@@ -183,6 +186,35 @@
   #saved { position: fixed; z-index: 7; bottom: 14px; left: 14px; width: 6px; height: 6px; border-radius: 50%; background: rgb(var(--applied)); opacity: 0; pointer-events: none; }
   #saved.landed { animation: saved 1.2s ease-out; }
   @keyframes saved { from { opacity: 0.9; } }
+  :root { --thread: var(--style); --mono: "JetBrains Mono", ui-monospace, Menlo, monospace; --sans: Inter, -apple-system, "Helvetica Neue", sans-serif; --hairline: rgba(128, 128, 140, 0.18); }
+  #headers, #memory { font-family: var(--sans); }
+  #gauges { border: 0; border-top: 1px solid var(--hairline); border-bottom: 1px solid var(--hairline); border-radius: 0; background: none; padding: 14px 0 12px; margin: -1.4rem 0 2.6rem; font-family: var(--sans); gap: 10px 6px; }
+  .jev-meter { font-family: var(--sans); color: var(--faint); }
+  .jev-meter span:last-child, .gauge .value, .gauge .delta, .count { font-family: var(--mono); font-weight: 500; letter-spacing: -0.01em; }
+  .gauge .track { stroke: var(--hairline); }
+  .gauge .level { stroke-width: 3.5; }
+  .gauge .track { stroke-width: 3.5; }
+  .gauge .value { font-size: 12px; }
+  .gauge .name { opacity: 0.6; font-size: 11px; }
+  .gauge .delta.up { color: rgb(var(--style)); }
+  .gauge .delta.down { color: var(--faint); }
+  .gauge.pulse .level { filter: none; }
+  .gauge .tip { font-family: var(--sans); border-radius: 3px; background: var(--paper); color: var(--ink); border: 1px solid var(--hairline); }
+  .count { border: 0; border-left: 1px solid var(--hairline); border-radius: 0; padding: 0 0 0 12px; margin-left: 6px; font-size: 12px; }
+  .card { background: none; border: 0; border-radius: 0; box-shadow: none; padding: 0 0 0 2px; font-family: var(--sans); font-size: 12.5px; line-height: 1.45; }
+  .card::before { content: ""; position: absolute; top: 0.72em; left: -28px; width: 22px; border-top: 1px solid rgba(var(--style), 0.5); }
+  .card p:first-child { color: var(--faint); }
+  .card p:first-child b { display: none; }
+  .card .coworker { position: relative; padding-left: 12px; }
+  .card .coworker::before { content: ""; position: absolute; left: 0; top: 0.5em; width: 5px; height: 5px; border-radius: 50%; background: rgb(var(--style)); }
+  .card .coworker b { display: none; }
+  .card .rings { display: inline-flex; vertical-align: middle; gap: 0; margin: 0 0 0 4px; }
+  .gauge.mini { width: auto; display: inline-flex; align-items: center; gap: 3px; padding-right: 6px; }
+  .gauge.mini svg { width: 16px; height: 16px; margin: 0; }
+  .gauge.mini .value { position: static; height: auto; line-height: 1; font-size: 10.5px; color: var(--faint); }
+  .gauge.mini .name { display: none; }
+  .gauge.mini .tip { top: calc(100% + 4px); }
+  .anchor { border-bottom: 1px solid rgba(var(--style), 0.8); background: rgba(var(--style), 0.08); }
 </style>
 </head>
 <body>
@@ -312,7 +344,7 @@ function renderThread(sheet) {
   const card = document.createElement("div");
   card.className = thread.kept ? "card shake" : "card";
   const lines = thread.question ? [`<p><b>You</b>${escape(thread.question)}</p>`] : [];
-  lines.push(`<p class="coworker"><b>jevflow</b>${thread.answer === undefined ? '<span class="status">thinking…</span>' : `<span class="measures"></span>${escape(thread.answer)}`}</p>`);
+  lines.push(`<p class="coworker"><b>jevflow</b>${thread.answer === undefined ? '<span class="status">thinking…</span>' : `${escape(thread.answer)}<span class="measures"></span>`}</p>`);
   if (thread.reply) lines.push(`<p><b>You</b>${escape(thread.reply)}</p>`);
   if (thread.status) lines.push(`<p class="status">${escape(thread.status)}</p>`);
   card.innerHTML = lines.join("");
@@ -600,7 +632,7 @@ function currentGoal() {
 }
 
 function gaugeColor(probability) {
-  return `hsl(${Math.round(8 + 130 * probability)}, 62%, 48%)`;
+  return `rgba(var(--style), ${(0.3 + 0.7 * probability).toFixed(2)})`;
 }
 
 function levelWord(probability) {
