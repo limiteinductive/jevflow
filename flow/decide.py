@@ -12,7 +12,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, create_model
 from pydantic_ai import Agent
 
-from flow import feed, generator
+from flow import feed, generator, reactions
 from text_processing import Sentence, split_sentences
 
 MODEL = "typesafe:jev-latest"
@@ -129,7 +129,7 @@ class Suggestion:
 agent = Agent(MODEL)
 """One agent for every decision: a fresh agent per call opens a new connection and adds about 0.4 s."""
 
-sentence_notes: dict[tuple[str, str], SentenceNote | None] = {}
+sentence_notes: dict[tuple[str, str, str], SentenceNote | None] = {}
 """Decisions by sentence text; the page asks about the whole draft on every pause, so each sentence is decided once."""
 
 sentence_fixes: dict[tuple[str, str], tuple[str | None, GoalSuggestion | None]] = {}
@@ -154,7 +154,7 @@ async def run(output_type: type[BaseModel], prompt: str) -> dict[str, float | st
     return answers
 
 
-async def decide_note(sentence: str, comment: str) -> SentenceNote | None:
+async def decide_note(sentence: str, comment: str, goal: str) -> SentenceNote | None:
     """Jev gates the sentence while the LLM copies out the note words and writes the header (the local model is free, so it runs on every sentence); Jev then checks both.
 
     When the copied words fail the check, the sentence is a note only if Jev reads all of it as one; a header that fails is replaced by the note words.
@@ -168,10 +168,12 @@ async def decide_note(sentence: str, comment: str) -> SentenceNote | None:
         is_question=(YesNo, Field(description="Is the sentence a question?")),
         field=(HeaderField, Field(description="What is the note about? goal: what the writer is writing; audience: who it is for; tone: how it should sound; to_do: something to add, check or change; undo: asks to undo the last edit.")),
         **reply,
+        **reactions.fields(goal),
     )
     gate, (note, header), question = await asyncio.gather(
         run(NoteGate, f"Sentence: {sentence}"), generator.extract_note(sentence), generator.extract_question(sentence)
     )
+    reactions.record(sentence, goal, gate)
     if gate.get("reply", 0) >= NOTE_GATE:
         feed.act(gate, "applied", "reply")
         return SentenceNote(sentence, gate["reply"], "reply", "")
@@ -246,15 +248,15 @@ async def timing(text: str) -> Timing:
     return Timing(moment["mid_thought"], moment["interrupt"])
 
 
-async def find_notes(text: str, comment: str, breaks: list[int]) -> list[Note]:
-    """At most one note per sentence, located by character offsets in `text`; `comment` is the coworker's open comment, or empty."""
+async def find_notes(text: str, comment: str, breaks: list[int], goal: str) -> list[Note]:
+    """At most one note per sentence, located by character offsets in `text`; `comment` is the coworker's open comment and `goal` the Goal header, each possibly empty."""
     sentences = line_sentences(text, breaks)
-    fresh = list(dict.fromkeys(sentence.text.rstrip(".") for sentence in sentences if (sentence.text.rstrip("."), comment) not in sentence_notes))
-    for sentence, decision in zip(fresh, await asyncio.gather(*(decide_note(sentence, comment) for sentence in fresh))):
-        sentence_notes[sentence, comment] = decision
+    fresh = list(dict.fromkeys(sentence.text.rstrip(".") for sentence in sentences if (sentence.text.rstrip("."), comment, goal) not in sentence_notes))
+    for sentence, decision in zip(fresh, await asyncio.gather(*(decide_note(sentence, comment, goal) for sentence in fresh))):
+        sentence_notes[sentence, comment, goal] = decision
     notes = []
     for sentence in sentences:
-        decision = sentence_notes[sentence.text.rstrip("."), comment]
+        decision = sentence_notes[sentence.text.rstrip("."), comment, goal]
         if decision is None:
             continue
         start = text.find(decision.text, sentence.start)
