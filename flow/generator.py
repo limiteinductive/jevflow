@@ -6,7 +6,7 @@ Jev makes every decision; these calls only write text.
 import httpx
 
 MLX_URL = "http://127.0.0.1:8085/v1"
-MODEL = "Qwen/Qwen3-4B-MLX-8bit"
+MODEL = "Qwen/Qwen3-4B-MLX-4bit"
 NOTE_INSTRUCTIONS = (
     "The user message is one sentence a writer typed. It holds a note to a writing assistant, and it may also hold the writer's own text. "
     "Reply with two lines. Line 1: the note words, copied exactly. Line 2: the note as a short header value."

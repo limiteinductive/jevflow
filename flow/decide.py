@@ -19,6 +19,8 @@ MAX_NOTE_WORDS = 12
 NOTE_THRESHOLD = 0.6
 NOTE_GATE = 0.55
 """A sentence holds a note when the plan question reaches this; hand-made notes score 0.89 to 0.98 and prose sentences at most 0.21."""
+OWN_DRAFT_GATE = 0.3
+"""A question lifts only when "about their own draft?" reaches this: questions to the recipient ('want me to grab pad thai') score 0.00 to 0.04, and the demo's run-on 'wdyt?' 0.43 to 0.49."""
 NUM_DRAFTS = 3
 ANSWER_FLOOR = 0.3
 """Below this on "answers the writer's question?" for every draft, the drafts are resampled once."""
@@ -144,7 +146,8 @@ async def decide_note(sentence: str, comment: str) -> SentenceNote | None:
     if field == "undo":
         return SentenceNote(sentence, probability, "undo", "") if len(sentence.split()) <= MAX_NOTE_WORDS else None
     if field == "question":
-        return SentenceNote(await question_span(sentence, question), probability, "question", "")
+        span = await question_span(sentence, question)
+        return SentenceNote(span, probability, "question", "") if span else None
     NoteCheck = create_model(
         "NoteCheck",
         __doc__=NOTE_CONTEXT + f" The sentence is: '{sentence}'.",
@@ -166,17 +169,24 @@ async def decide_note(sentence: str, comment: str) -> SentenceNote | None:
     return SentenceNote(note, probability, field, header if min(header_check["fair"], 1 - header_check["adds"]) >= NOTE_THRESHOLD else note)
 
 
-async def question_span(sentence: str, question: str) -> str:
-    """The question words when they end `sentence` and Jev says they hold the whole question, else the whole sentence; the text before them stays in the draft."""
-    if not question or question == sentence or not sentence.endswith(question):
-        return sentence
+async def question_span(sentence: str, question: str) -> str | None:
+    """The span to lift as a question to the coworker, or None when Jev says it asks the person the text is for.
+
+    The span is the copied question words when they end `sentence` and Jev says they hold the whole question, else the whole
+    sentence; the text before them stays in the draft. "About their own draft" is asked of the span alone, since a run-on
+    sentence is mostly the writer's text.
+    """
+    span = question if question and question != sentence and sentence.endswith(question) else sentence
     QuestionCheck = create_model(
         "QuestionCheck",
-        __doc__=f"A writer typed: '{sentence}'.",
-        whole_question=(YesNo, Field(description=f"Does '{question}' hold the whole question, leaving none of its words out?")),
+        __doc__=NOTE_CONTEXT + f" The writer typed: '{sentence}'.",
+        whole_question=(YesNo, Field(description=f"Does '{span}' hold the whole question, leaving none of its words out?")),
+        about_own_draft=(YesNo, Field(description=f"In '{span}', is the writer asking about their own draft (how it reads, whether it works), rather than asking the person the text is for?")),
     )
     check = await run(QuestionCheck, f"Typed: {sentence}")
-    return question if check["whole_question"] >= NOTE_THRESHOLD else sentence
+    if check["about_own_draft"] < OWN_DRAFT_GATE:
+        return None
+    return span if span == sentence or check["whole_question"] >= NOTE_THRESHOLD else sentence
 
 
 async def find_notes(text: str, comment: str, breaks: list[int]) -> list[Note]:
