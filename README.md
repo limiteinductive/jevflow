@@ -4,9 +4,9 @@
 
 jevflow reads each sentence as you type it. It knows what you're writing and who it's for, and it stays out of the way until something is worth saying.
 
-![jevflow demo: a note lifts into the Goal, Audience and Tone headers, the page gets a title, impact rings appear, an AI-sounding sentence is flagged, a false claim gets a 1% ring, a question gets a margin reply, and the decisions column opens](docs/images/demo.gif)
+![jevflow demo with each feature outlined in pink and named in a caption: notes and titles, gauges and reactions, flags, claims, replies, the decisions feed, ideas, and the components panel](docs/images/demo.gif)
 
-<sub>Recorded on a local instance, unedited. What you see: one typed note becomes three headers, the page names itself, rings score the draft against the Goal, "Moreover, this multifaceted…" is flagged as reading like AI, "Docker was first released in 2019" gets a 1%-true ring, "wdyt about the moreover line?" gets an answer in the margin, and a reply's rewrite is refused (✋) because it didn't pass every check.</sub>
+<sub>Recorded on a local instance. The model output is unedited; the pink outlines and captions were overlaid in the browser for the recording. The reply's rewrite is refused (✋) because Jev found it failed a check, so the draft stays as typed.</sub>
 
 ## One stream, no modes
 
