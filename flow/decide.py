@@ -284,8 +284,8 @@ async def find_notes(text: str, comment: str, breaks: list[int], goal: str) -> l
     return notes
 
 
-async def decide_fix(sentence: str, goal: str, categories: list[str]) -> tuple[str | None, GoalSuggestion | None]:
-    """The LLM's correction of `sentence` when Jev says it keeps the meaning and the voice, stays small and fixes a real mistake.
+async def decide_fix(sentence: str, draft: str, goal: str, categories: list[str]) -> tuple[str | None, GoalSuggestion | None]:
+    """The LLM's correction of `sentence` when Jev says it keeps the meaning and the voice, stays small, fixes a real mistake, and does not capitalize a `draft` kept lowercase on purpose.
 
     Without an accepted correction, one question per Goal category (the gauges' categories) rides in the same request.
     When Jev says the sentence makes the text less of a category, the LLM rewrites it and `revise` gates the rewrite.
@@ -302,14 +302,17 @@ async def decide_fix(sentence: str, goal: str, categories: list[str]) -> tuple[s
             small=(YesNo, Field(description="Does the correction only fix mistakes, changing as few words as possible?")),
             real_mistake=(YesNo, Field(description="Does the correction fix a real mistake in the sentence?")),
             on_purpose=(YesNo, Field(description="Does the correction change a spelling or word the writer chose on purpose, for voice or a joke (like 'akshually' or 'gonna')?")),
+            lowercase=(YesNo, Field(description="Is the draft written in lowercase on purpose, like casual texting, with sentences starting lowercase?")),
+            capitalizes=(YesNo, Field(description="Does the correction capitalize a letter the sentence had in lowercase?")),
         )
     fields.update({f"hurts_{index}": (YesNo, Field(description=f"Does the sentence make the text less {category}?")) for index, category in enumerate(categories)})
     context = f"A writer drafting {goal} wrote a sentence." if categories else "A writer wrote a sentence."
-    correction = f" A writing assistant proposes a correction. Correction: '{replacement}'." if corrects else ""
+    correction = f" Draft so far: '{draft}'. A writing assistant proposes a correction. Correction: '{replacement}'." if corrects else ""
     FixCheck = create_model("FixCheck", __doc__=f"{context} Sentence: '{sentence}'.{correction}", **fields)
     check = await run(FixCheck, f"Sentence: {sentence}" + (f"\n\nCorrection: {replacement}" if corrects else ""))
-    if corrects and min(check["keeps_meaning"], check["same_voice"], check["small"], check["real_mistake"], 1 - check["on_purpose"]) >= FIX_THRESHOLD:
-        feed.act(check, "applied", "keeps_meaning", "same_voice", "small", "real_mistake", "on_purpose")
+    keeps_register = corrects and min(check["lowercase"], check["capitalizes"]) < NOTE_GATE
+    if keeps_register and min(check["keeps_meaning"], check["same_voice"], check["small"], check["real_mistake"], 1 - check["on_purpose"]) >= FIX_THRESHOLD:
+        feed.act(check, "applied", "keeps_meaning", "same_voice", "small", "real_mistake", "on_purpose", "lowercase", "capitalizes")
         return replacement, None
     hurt = [(check[f"hurts_{index}"], category) for index, category in enumerate(categories) if check[f"hurts_{index}"] >= HURTS_THRESHOLD]
     hurts = [f"hurts_{index}" for index in range(len(categories)) if check[f"hurts_{index}"] >= HURTS_THRESHOLD]
@@ -332,7 +335,9 @@ async def find_fixes(text: str, limit: int, goal: str, categories: list[str]) ->
         sentence for sentence in line_sentences(text, []) if sentence.start + len(sentence.text) <= limit and text.startswith(sentence.text, sentence.start)
     ]
     fresh = list(dict.fromkeys(sentence.text for sentence in sentences if (sentence.text, goal) not in sentence_fixes))
-    for sentence, decision in zip(fresh, await asyncio.gather(*(decide_fix(sentence, goal, categories) for sentence in fresh))):
+    ends = {sentence.text: sentence.start + len(sentence.text) for sentence in sentences}
+    decisions = await asyncio.gather(*(decide_fix(sentence, text[max(0, ends[sentence] - TIMING_CONTEXT_CHARS):ends[sentence]], goal, categories) for sentence in fresh))
+    for sentence, decision in zip(fresh, decisions):
         sentence_fixes[sentence, goal] = decision
     fixes, suggestions = [], []
     for sentence in sentences:
