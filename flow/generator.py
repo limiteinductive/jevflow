@@ -85,6 +85,14 @@ REVISE_EXAMPLES = [
         "my cat hid from the vacuum for years. turns out she was right all along",
     )
 ]
+MASH_INSTRUCTIONS = VOICE + (
+    " The writer's last line is keyboard mash, not words: maybe a cat walked on the keyboard, maybe they are frustrated. Reply with one short playful check-in, nothing else."
+)
+MASH_EXAMPLES = [
+    ("Goal: a text to my wife\nTyped: jkjkjkjk;;;; lkjhg", "you ok? your keyboard just sneezed lol"),
+    ("Goal: a blog post\nTyped: fffffffff dddsa;;l", "did something just sit on your laptop? 😅"),
+]
+"""Worked turns sent before the mash; without them the voice rules turn the check-in into a verdict with a fix."""
 QUESTION_INSTRUCTIONS = (
     "The user message is text a writer typed. It ends with a question the writer asks their coworker about the text, and it may start with the writer's own text. "
     "Reply with the question words only, copied exactly, leaving out the writer's own text."
@@ -170,6 +178,11 @@ async def answers(sentence: str, paragraph: str, question: str, goal: str, count
 
 async def revise(sentence: str, comment: str, reply: str, memory: str) -> str:
     return undash(await chat(REVISE_INSTRUCTIONS, REVISE_EXAMPLES, f"{memory}Sentence: {sentence}\nComment: {comment}\nWriter's reply: {reply}", 2 * len(sentence.split()) + 40))
+
+
+async def mash_comment(text: str, goal: str) -> str:
+    """The coworker's one-line check-in on keyboard mash the writer typed."""
+    return undash(await chat(MASH_INSTRUCTIONS, MASH_EXAMPLES, f"Goal: {goal}\nTyped: {text}", 40))
 
 
 async def extract_question(sentence: str) -> str:
