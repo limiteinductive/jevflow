@@ -79,6 +79,21 @@ class Forget(BaseModel):
     sentence: str
 
 
+class Candidate(BaseModel):
+    id: str
+    title: str
+    line: str
+    """The page's line that shares the most words with the question."""
+
+
+class PageSearch(BaseModel):
+    question: str
+    open: bool
+    """The writer asks to go to the page, rather than about what it says."""
+    candidates: list[Candidate]
+    """The writer's other pages whose title or text shares a word with the question, found by the page's keyword pass."""
+
+
 class Undo(BaseModel):
     draft: str
     before: str
@@ -228,6 +243,23 @@ async def forget_ref(request: Forget) -> dict:
     """A forget typed about a clicked fact, with its token replaced by the fact's words; `forget` gates and writes it."""
     await forget(request.sentence)
     return state()
+
+
+@router.post("/pages/search")
+async def search_pages(search: PageSearch) -> dict:
+    """The candidate Jev ranks highest on "does this page answer the question?" (or "is it the page to open?"), with its P, or an empty reply when none reaches `RELEVANT_THRESHOLD`."""
+    if not search.candidates:
+        return {}
+    asks = "Is the page '{title}' the one the writer asks for in '{question}'?" if search.open else "Does the writer's page '{title}', with the line '{line}', answer '{question}'?"
+    fields = {
+        f"answers_{index}": (decide.YesNo, Field(description=asks.format(title=candidate.title, line=candidate.line, question=search.question)))
+        for index, candidate in enumerate(search.candidates)
+    }
+    check = await decide.run(create_model("PageSearch", __doc__="A writer asks jevflow about their other pages.", **fields), f"Question: {search.question}")
+    best = max(range(len(search.candidates)), key=lambda index: check[f"answers_{index}"])
+    probability = check[f"answers_{best}"]
+    feed.act(check, "shown" if probability >= RELEVANT_THRESHOLD else "dropped", f"answers_{best}")
+    return search.candidates[best].model_dump() | {"probability": probability} if probability >= RELEVANT_THRESHOLD else {}
 
 
 @router.post("/memory/pause")

@@ -23,6 +23,7 @@ COMPONENTS = {
     "memory": "remembers facts about you and recalls the ones that matter",
     "probes": "answers your own yes/no question about a copied selection, as a ring",
     "feed": "shows every decision live in a column on the right",
+    "claims": "rings a claim that reads as false and offers the fix",
 }
 """Name to one line on what the component does, as the coworker would say it. A new component adds its line here."""
 ComponentName = Literal[tuple(COMPONENTS)]
