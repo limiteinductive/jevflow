@@ -5,6 +5,7 @@ The LLM only names categories. Every Jev question comes from one fixed template,
 
 import asyncio
 import re
+import time
 from dataclasses import dataclass
 
 from fastapi import APIRouter
@@ -55,8 +56,15 @@ router = APIRouter()
 brief_categories: dict[Brief, asyncio.Task[list[Category]]] = {}
 """Gauge categories by brief, picked on the first pause with a draft, as tasks so concurrent pauses share one LLM and Jev round."""
 
-draft_scores: dict[tuple[Brief, str], list[float]] = {}
-"""P(yes) for each category's question by (brief, draft text)."""
+@dataclass(frozen=True)
+class Scores:
+    probabilities: list[float]
+    """P(yes) for each category's question, in category order."""
+    seconds: float
+    """How long the Jev round took."""
+
+
+draft_scores: dict[tuple[Brief, str], Scores] = {}
 
 
 class GaugeDraft(BaseModel):
@@ -86,15 +94,16 @@ async def choose_categories(brief: Brief, opening: str) -> list[Category]:
     return [Category(name, f"Is this {brief.goal} {name}?") for probability, name in ranked]
 
 
-async def score(text: str, brief: Brief, categories: list[Category]) -> list[float]:
-    """P(yes) for every category's question about the draft, all in one Jev payload."""
+async def score(text: str, brief: Brief, categories: list[Category]) -> Scores:
+    """Every category's question about the draft, all in one Jev payload."""
     Impact = create_model(
         "Impact",
         __doc__=f"A writer is drafting {brief.kind()}.",
         **{f"category_{index}": (decide.YesNo, Field(description=category.question)) for index, category in enumerate(categories)},
     )
+    began = time.perf_counter()
     check = await decide.run(Impact, f"Draft: {text}")
-    return [check[f"category_{index}"] for index in range(len(categories))]
+    return Scores([check[f"category_{index}"] for index in range(len(categories))], time.perf_counter() - began)
 
 
 @router.post("/gauges")
@@ -102,7 +111,7 @@ async def gauges(draft: GaugeDraft) -> dict:
     """The gauges for the draft under its brief, and the character limit when the goal is an X post; empty when there is no goal or no draft."""
     brief, text = Brief(draft.goal.strip(), draft.audience.strip(), draft.tone.strip()), draft.text.strip()
     if not brief.goal or not text:
-        return {"gauges": [], "limit": None}
+        return {"gauges": [], "limit": None, "seconds": None}
     if brief not in brief_categories:
         brief_categories[brief] = asyncio.create_task(choose_categories(brief, text))
     try:
@@ -112,9 +121,9 @@ async def gauges(draft: GaugeDraft) -> dict:
         raise
     if (brief, text) not in draft_scores:
         draft_scores[brief, text] = await score(text, brief, categories)
+    scores = draft_scores[brief, text]
     return {
-        "gauges": [
-            {"name": category.name, "question": category.question, "probability": probability} for category, probability in zip(categories, draft_scores[brief, text])
-        ],
+        "gauges": [{"name": category.name, "question": category.question, "probability": probability} for category, probability in zip(categories, scores.probabilities)],
         "limit": X_POST_LIMIT if X_POST.search(brief.goal) else None,
+        "seconds": scores.seconds,
     }
