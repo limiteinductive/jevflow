@@ -14,6 +14,12 @@
   #headers { font: 14px/1.5 -apple-system, "Helvetica Neue", sans-serif; color: var(--faint); margin-bottom: 2.4rem; min-height: 1.5em; }
   #headers div { margin: 0.1rem 0; }
   #headers b { color: var(--ink); font-weight: 600; margin-right: 0.4rem; }
+  #blocks { display: grid; grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); gap: 10px; margin: -1.2rem 0 2.4rem; font: 13px/1.45 -apple-system, "Helvetica Neue", sans-serif; }
+  .block { background: var(--card-bg); border: 1px solid var(--card-edge); border-radius: 8px; padding: 8px 10px; }
+  .block h3 { margin: 0 0 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--faint); }
+  .block ul { margin: 0; padding-left: 1.1em; }
+  .block li.coworker { color: rgb(var(--thread)); }
+  .block li p { margin: 2px 0 0; color: var(--faint); }
   .sheet { position: relative; }
   .layer {
     font: 20px/2.1 "Iowan Old Style", "Palatino", Georgia, serif;
@@ -47,6 +53,7 @@
 <body>
 <div class="page">
   <div id="headers"></div>
+  <div id="blocks"></div>
   <div class="sheet">
     <div id="backdrop" class="layer" aria-hidden="true"></div>
     <textarea id="editor" class="layer" spellcheck="false" autofocus placeholder="Just write. Say what you're writing, who it's for and what to fix, all inline."></textarea>
@@ -55,19 +62,22 @@
   </div>
 </div>
 <script>
-const FIELDS = { goal: "Goal", audience: "Audience", tone: "Tone", to_do: "To do" };
+const FIELDS = { goal: "Goal", audience: "Audience", tone: "Tone" };
+const BLOCKS = { to_do: "To do", ideas: "Ideas" };
+const IDEA_EVERY = 3;
 const MAX_OPEN_QUESTIONS = 3;
 const FLASH_MS = 1200;
 const editor = document.getElementById("editor");
 const backdrop = document.getElementById("backdrop");
 const asksLayer = document.getElementById("asks");
 const headersBox = document.getElementById("headers");
+const blocksBox = document.getElementById("blocks");
 const commentsLayer = document.getElementById("comments");
 const THREAD_FADE_SENTENCES = 2;
 let thread = null;
 let notes = [], insights = [], headers = [], history = [], flashes = [];
 const declined = new Set();
-let notesTimer, insightsTimer, fixesTimer, notesRequest = 0, insightsRequest = 0, fixesRequest = 0;
+let notesTimer, insightsTimer, fixesTimer, notesRequest = 0, insightsRequest = 0, fixesRequest = 0, ideasAt = 0;
 
 const escape = (text) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
@@ -136,6 +146,17 @@ function render() {
     const entries = headers.filter((header) => header.field === field).map((header) => escape(header.text));
     return entries.length ? `<div><b>${name}:</b>${entries.join("; ")}</div>` : "";
   }).join("");
+  blocksBox.innerHTML = [...Object.entries(BLOCKS), ...createdBlocks().map((name) => [name, name]), ["question", "Open questions"]].map(([field, name]) => {
+    const entries = headers.filter((header) => header.field === field).map((header) => {
+      const answer = header.thread ? `<p>${header.thread.answer === undefined ? "thinking…" : escape(header.thread.answer)}</p>` : "";
+      return `<li class="${header.coworker ? "coworker" : ""}">${escape(header.text)}${answer}</li>`;
+    });
+    return entries.length ? `<section class="block"><h3>${escape(name)}</h3><ul>${entries.join("")}</ul></section>` : "";
+  }).join("");
+}
+
+function createdBlocks() {
+  return [...new Set(headers.map((header) => header.field).filter((field) => !(field in FIELDS) && !(field in BLOCKS) && field !== "question"))];
 }
 
 function renderThread(sheet) {
@@ -223,7 +244,7 @@ function undo() {
   if (!previous) return;
   declined.add(previous.key);
   headers = previous.headers;
-  replaceAll(previous.text, previous.text.length);
+  if (previous.text !== null) replaceAll(previous.text, previous.text.length);
 }
 
 function removalRange(text, note) {
@@ -250,7 +271,10 @@ function liftNotes() {
       const [start, end] = removalRange(editor.value, note);
       applyEdit(start, end, "", `note ${note.text}`);
       if (note.field === "reply" && thread && thread.answer) replyToThread(note.text);
-      else if (note.field === "question" && anchor.text) openThread(anchor, note.text);
+      else if (note.field === "question" && anchor.text) {
+        openThread(anchor, note.text);
+        headers.push({ field: "question", text: note.text, thread });
+      }
       continue;
     }
     if (note.field === "undo") {
@@ -272,12 +296,26 @@ async function findNotes() {
   if (!text.trim()) return;
   const request = ++notesRequest;
   const comment = thread && thread.answer && !thread.reply ? thread.answer : "";
-  const result = await post("/notes", { text, comment });
+  const result = await post("/notes", { text, comment, blocks: createdBlocks() });
   if (request !== notesRequest || editor.value !== text) return;
   notes = result.notes;
   liftNotes();
   render();
+  const finished = (editor.value.slice(0, typingStart()).match(/[.!?\n]/g) || []).length;
+  if (finished >= ideasAt + IDEA_EVERY) findIdeas(finished);
   if (editor.value !== text) insightsTimer = setTimeout(findInsights, 300);
+}
+
+async function findIdeas(finished) {
+  ideasAt = finished;
+  const goal = headers.find((header) => header.field === "goal");
+  const known = headers.filter((header) => header.field === "ideas").map((header) => header.text);
+  const result = await post("/ideas", { text: editor.value.slice(0, typingStart()), goal: goal ? goal.text : "", known });
+  for (const idea of result.ideas.filter((idea) => !known.includes(idea) && !declined.has(`idea ${idea}`))) {
+    history.push({ text: null, headers: headers.slice(), key: `idea ${idea}` });
+    headers.push({ field: "ideas", text: idea, coworker: true });
+  }
+  render();
 }
 
 async function findFixes() {

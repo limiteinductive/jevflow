@@ -5,7 +5,6 @@ The page is a stack of blocks: Goal (with Audience and Tone), Content, To do, Id
 
 from typing import Literal
 
-import httpx
 from fastapi import APIRouter
 from pydantic import BaseModel, Field, create_model
 
@@ -28,8 +27,6 @@ KEPT_GATE = 0.7
 BLOCK_THRESHOLD = 0.6
 MAX_IDEAS = 2
 IDEA_THRESHOLD = 0.6
-NAME_URL = "http://127.0.0.1:8083/v1"
-NAME_MODEL = "Qwen/Qwen3-1.7B-MLX-8bit"
 NAME_INSTRUCTIONS = (
     "The user message is a writer's note about their document. Reply with a short name, one or two words, for the part of the document the note belongs to. "
     "When the note starts with a label such as 'sources:', the label is the name."
@@ -52,7 +49,6 @@ IDEAS_EXAMPLES = [
 
 YesNo = Literal["yes", "no"]
 
-small = httpx.AsyncClient(base_url=NAME_URL, timeout=30)
 router = APIRouter()
 
 
@@ -70,23 +66,8 @@ def choice(names: list[str]) -> tuple[type, Field]:
 
 
 async def propose_name(sentence: str) -> str:
-    """A short block name for `sentence` from the small local model, asked for every note in parallel with Jev's gate so a new block costs no extra round."""
-    response = await small.post(
-        "/chat/completions",
-        json={
-            "model": NAME_MODEL,
-            "messages": [
-                {"role": "system", "content": NAME_INSTRUCTIONS},
-                *({"role": role, "content": content} for example in NAME_EXAMPLES for role, content in zip(("user", "assistant"), example)),
-                {"role": "user", "content": sentence},
-            ],
-            "max_tokens": 8,
-            "temperature": 0,
-            "chat_template_kwargs": {"enable_thinking": False},
-        },
-    )
-    response.raise_for_status()
-    return (response.json()["choices"][0]["message"]["content"] or "").strip().strip("'\".:").title()
+    """A short block name for `sentence` from the local model, asked for every note in parallel with Jev's gate so a new block costs no extra round."""
+    return (await generator.chat(NAME_INSTRUCTIONS, NAME_EXAMPLES, sentence, 8)).strip("'\".:").title()
 
 
 async def resolve(block: str, sentence: str, name: str, names: list[str]) -> str:

@@ -116,7 +116,7 @@ async def decide_note(sentence: str, comment: str, names: list[str]) -> Sentence
     asks = min(gate["asks"], gate["is_question"])
     field = "question" if asks >= NOTE_GATE else gate["block"]
     probability = max(gate["plan"], asks, gate["kept"] if gate["kept"] >= blocks.KEPT_GATE else 0)
-    if probability < NOTE_GATE or field == "content":
+    if probability < NOTE_GATE:
         return None
     if field == "undo":
         return SentenceNote(sentence, probability, "undo", "") if len(sentence.split()) <= MAX_NOTE_WORDS else None
