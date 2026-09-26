@@ -48,7 +48,8 @@ VOICE = (
 """The coworker's voice; every prompt whose output the writer reads as the coworker's words starts with it."""
 ANSWER_INSTRUCTIONS = VOICE + (
     " The writer asks you about what they just wrote: the last sentence, or the whole paragraph if the question is about it. "
-    "Say what a reader of this kind of text might miss, and give one concrete fix. Keep their joke."
+    "Say what a reader of this kind of text might miss, and give one concrete fix. Keep their joke. "
+    "If they ask about you (what you can do, what you are doing), answer from your features and whether each is on."
 )
 ANSWER_EXAMPLES = [
     (
@@ -66,6 +67,11 @@ ANSWER_EXAMPLES = [
     (
         "Goal: an x post\nParagraph: our smol team shipped it anyway\nLast sentence: our smol team shipped it anyway\nQuestion: does this land?",
         "lands. \"smol\" sells the joke, leaving it as is.",
+    ),
+    (
+        "Your features that are on: notes: files what you say about the draft as headers; replies: answers your questions in the margin; gauges: scores the draft for your Goal\nYour features that are off: corrections, reactions\n"
+        "Goal: a cover letter\nParagraph: I led the migration to Postgres.\nLast sentence: I led the migration to Postgres.\nQuestion: what can you do?",
+        "i file your notes up top, answer you here and score it for your goal. corrections and reactions are off, just ask to turn them on.",
     ),
 ]
 REVISE_INSTRUCTIONS = (
@@ -137,12 +143,12 @@ async def fix(sentence: str) -> str:
     return await chat(FIX_INSTRUCTIONS, FIX_EXAMPLES, sentence, 2 * len(sentence.split()) + 16)
 
 
-async def answers(sentence: str, paragraph: str, question: str, goal: str, count: int, memory: str) -> list[str]:
+async def answers(sentence: str, paragraph: str, question: str, goal: str, count: int, context: str) -> list[str]:
     """`count` sampled replies from one batched completion; the prompt is Qwen3's chat template with thinking off, written out because /completions takes raw text.
 
-    mlx_lm.server ignores `n` and returns one reply. `memory` is `flow.memory.context()`.
+    mlx_lm.server ignores `n` and returns one reply. `context` is `flow.memory.context()` and `flow.components.context()`.
     """
-    turns = messages(ANSWER_INSTRUCTIONS, ANSWER_EXAMPLES, f"{memory}Goal: {goal}\nParagraph: {paragraph}\nLast sentence: {sentence}\nQuestion: {question}")
+    turns = messages(ANSWER_INSTRUCTIONS, ANSWER_EXAMPLES, f"{context}Goal: {goal}\nParagraph: {paragraph}\nLast sentence: {sentence}\nQuestion: {question}")
     prompt = "".join(f"<|im_start|>{turn['role']}\n{turn['content']}<|im_end|>\n" for turn in turns) + "<|im_start|>assistant\n<think>\n\n</think>\n\n"
     response = await mlx.post("/completions", json={"model": MODEL, "prompt": prompt, "n": count, "max_tokens": 60, "temperature": 0.9})
     response.raise_for_status()

@@ -500,7 +500,7 @@ async function openThread(anchor, question) {
   const opened = thread;
   const paragraphStart = editor.value.lastIndexOf("\n", anchor.start - 1) + 1;
   const paragraph = { start: paragraphStart, end: anchor.end, text: editor.value.slice(paragraphStart, anchor.end) };
-  const result = await post("/answer", { sentence: anchor.text, paragraph: paragraph.text, question, goal: goal ? goal.text : "" });
+  const result = await post("/answer", { sentence: anchor.text, paragraph: paragraph.text, question, goal: goal ? goal.text : "", disabled: [...disabled] });
   if (thread !== opened) return;
   if (result.scope === "paragraph") thread.anchor = paragraph;
   thread.answer = result.text;
@@ -548,6 +548,7 @@ let disabled = new Set();
 try { disabled = new Set(JSON.parse(localStorage.getItem(DISABLED_KEY)) || []); } catch {}
 fetch("/components").then((response) => response.json()).then((registry) => {
   components = registry;
+  document.getElementById("feed-toggle").hidden = !isOn("feed");
   window.dispatchEvent(new CustomEvent("components-loaded"));
 });
 
@@ -564,6 +565,9 @@ function setComponent(name, on) {
   if (!on && name === "corrections") { pendingFixes = []; pendingSuggestions = []; }
   if (!on && name === "gauges") { gauges = []; gaugesBox.innerHTML = ""; }
   if (!on && name === "memory") renderMemory({ facts: [], recalled: [] });
+  if (!on && name === "replies") thread = null;
+  if (!on && name === "feed" && document.body.classList.contains("feed-open")) toggleFeed();
+  document.getElementById("feed-toggle").hidden = !isOn("feed");
   if (on && name === "gauges") refreshGauges();
   render();
   window.dispatchEvent(new CustomEvent("component-toggle", { detail: { name, on } }));
@@ -645,6 +649,9 @@ function liftNotes() {
     notes = notes.filter((other) => other !== found);
     const note = clipToThread(found);
     if (!note) continue;
+    if ((note.field === "question" || note.field === "reply") && !isOn("replies")) continue;
+    if (note.field === "new_page" && !isOn("pages")) continue;
+    if (FIELDS[note.field] && !isOn("notes")) continue;
     if (note.field === "question" || note.field === "reply") {
       const anchor = previousSentence(editor.value, note.start);
       if (note.field === "question" && !anchor.text) continue;
@@ -874,6 +881,7 @@ function judgedSpan(prompt) {
 }
 
 function toggleFeed() {
+  if (!isOn("feed") && !document.body.classList.contains("feed-open")) return;
   const open = document.body.classList.toggle("feed-open");
   clearInterval(feedTimer);
   if (open) { pollFeed(); feedTimer = setInterval(pollFeed, FEED_POLL_MS); }
@@ -1045,6 +1053,7 @@ function trackRanges() {
 }
 
 async function rescoreProbes() {
+  if (!isOn("probes")) return;
   for (const probe of probes) {
     const text = editor.value.slice(probe.start, probe.end);
     if (text === probe.text || probe.options) continue;

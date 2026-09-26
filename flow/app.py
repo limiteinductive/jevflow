@@ -52,6 +52,8 @@ class Question(BaseModel):
     """The text from the start of the question's line or paragraph through `sentence`."""
     question: str
     goal: str
+    disabled: list[ComponentName]
+    """The components the writer turned off, so a question about jevflow is answered from its real state."""
 
 
 class Reply(BaseModel):
@@ -128,7 +130,8 @@ async def notes(draft: CommentedDraft) -> dict:
 
 @app.post("/answer")
 async def answer(question: Question) -> dict:
-    return asdict(await decide.answer(question.sentence, question.paragraph, question.question, question.goal, memory.context()))
+    enabled = frozenset(components.COMPONENTS) - frozenset(question.disabled)
+    return asdict(await decide.answer(question.sentence, question.paragraph, question.question, question.goal, memory.context() + components.context(enabled)))
 
 
 @app.post("/revise")
