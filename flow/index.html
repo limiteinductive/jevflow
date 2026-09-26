@@ -357,6 +357,7 @@ let notes = [], insights = [], headers = [], history = [], flashes = [], reactio
 const declined = new Set();
 let timing = null, pendingFixes = [], pendingSuggestions = [];
 const settled = () => timing !== null && timing.mid_thought < 0.5 && timing.interrupt >= 0.3;
+const RETRY_MS = 2000, REQUEST_TIMEOUT_MS = 15000;
 let notesTimer, insightsTimer, fixesTimer, notesRequest = 0, insightsRequest = 0, fixesRequest = 0, memoryRequest = 0;
 
 const escape = (text) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -659,7 +660,7 @@ function post(path, body) {
   const serialized = JSON.stringify(body);
   const last = lastRequests.get(path);
   if (last && last.serialized === serialized) return last.result;
-  const result = fetch(path, { method: "POST", headers: { "Content-Type": "application/json", "X-Pause": `${PAGE_LOAD} ${inputs}` }, body: serialized }).then((response) => {
+  const result = fetch(path, { method: "POST", headers: { "Content-Type": "application/json", "X-Pause": `${PAGE_LOAD} ${inputs}` }, body: serialized, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) }).then((response) => {
     if (!response.ok) throw new Error(`${path} ${response.status}`);
     return response.json();
   });
@@ -752,6 +753,7 @@ function liftNotes() {
       undo();
       continue;
     }
+    if (note.field === "new_page" && note.headers.some((header) => header.field === "goal" && header.text.trim().toLowerCase() === currentGoal().trim().toLowerCase())) continue;
     if (note.field === "new_page") {
       const [start, end] = removalRange(editor.value, note);
       replaceAll(editor.value.slice(0, start) + editor.value.slice(end), start);
@@ -772,7 +774,8 @@ async function findNotes() {
   const request = ++notesRequest;
   const comment = thread && thread.answer && !thread.reply ? thread.answer : "";
   const breaks = thread && stillThere(thread.anchor) ? [thread.anchor.end] : [];
-  const result = await post("/notes", { text, comment, breaks, goal: currentGoal(), disabled: [...disabled] });
+  const result = await post("/notes", { text, comment, breaks, goal: currentGoal(), disabled: [...disabled] }).catch(() => null);
+  if (!result) { refreshGauges(); notesTimer = setTimeout(findNotes, RETRY_MS); return; }
   if (request !== notesRequest || editor.value !== text) return;
   notes = result.notes;
   timing = result.timing;
@@ -944,7 +947,8 @@ async function refreshGauges() {
   gaugeBrief = brief;
   const request = ++gaugesRequest, began = performance.now();
   if (!goal || !text.trim()) { gauges = []; renderGauges(); return; }
-  const result = await post("/gauges", { text: contentText().replace(/\s+/g, " ").trim(), goal, audience, tone });
+  const result = await post("/gauges", { text: contentText().replace(/\s+/g, " ").trim(), goal, audience, tone }).catch(() => null);
+  if (!result) { setTimeout(refreshGauges, RETRY_MS); return; }
   if (request !== gaugesRequest || gaugeBrief !== brief || editor.value !== text) return;
   gaugeTimings.push((performance.now() - began) / 1000);
   gauges = result.gauges;

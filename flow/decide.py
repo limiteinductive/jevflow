@@ -265,7 +265,11 @@ async def decide_note(sentence: str, comment: str, goal: str, enabled: frozenset
 
     if field == "new_page":
         header_check = await run(HeaderCheck, f"Note: {note}\n\nHeader: {header}")
-        return SentenceNote(sentence, probability, field, headers("goal", sentence))
+        seeded = headers("goal", sentence)
+        print(f"new_page: {sentence!r} P={probability:.2f} goal={goal!r} seeds={[header.text for header in seeded]}", flush=True)
+        if any(header.field == "goal" and header.text.strip().lower() == goal.strip().lower() for header in seeded):
+            return None
+        return SentenceNote(sentence, probability, field, seeded)
     check, header_check = await asyncio.gather(run(NoteCheck, f"Sentence: {sentence}"), run(HeaderCheck, f"Note: {note}\n\nHeader: {header}"))
     if note not in sentence or min(check["only_note"], check["whole_note"]) < NOTE_THRESHOLD:
         if check["sentence_only_note"] < NOTE_THRESHOLD:
