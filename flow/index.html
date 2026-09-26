@@ -92,6 +92,10 @@
   .claim { position: absolute; display: flex; align-items: center; gap: 8px; white-space: nowrap; }
   .claim .swap { font: 500 12px/1.3 var(--sans, sans-serif); color: var(--ink); background: var(--card-bg); border: 1px solid var(--hairline, var(--card-edge)); border-radius: 6px; padding: 3px 7px; cursor: pointer; max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
   .claim .swap:hover { border-color: rgb(var(--style)); }
+  #diagrams { position: absolute; top: 0; left: calc(100% + 28px); width: 16rem; }
+  .diagram { position: absolute; width: 100%; animation: diagram-in 0.9s ease-out; }
+  .diagram svg { display: block; max-width: 100%; height: auto; }
+  @keyframes diagram-in { from { opacity: 0; transform: translateY(6px); } }
   .ref-gone { opacity: 0; transition: opacity 0.6s; pointer-events: none; }
   .count.over { color: rgb(200, 60, 50); font-weight: 600; }
   body { box-sizing: border-box; padding-left: var(--pages-space, 0px); transition: padding 0.35s cubic-bezier(0.2, 0.8, 0.2, 1); }
@@ -340,6 +344,7 @@
     <div id="reactions" data-ref="component:reactions" data-ref-data="the emoji reactions beside lines that land"></div>
     <div id="probes" data-ref="component:probes" data-ref-data="the rings answering your yes/no questions about copied text"></div>
     <div id="claims" data-ref="component:claims" data-ref-data="the rings on claims that read as false, with a one-click fix"></div>
+    <div id="diagrams" data-ref="component:diagrams" data-ref-data="the flowcharts beside paragraphs that explain how something works"></div>
   </div>
 </div>
 <button id="feed-toggle" tabindex="-1" title="Decisions (Cmd+J)" aria-label="Decisions"><svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="7" width="2.4" height="6"/><rect x="5.8" y="2" width="2.4" height="11"/><rect x="10.6" y="5" width="2.4" height="8"/></svg></button>
@@ -465,6 +470,7 @@ function render() {
   renderReactions(sheet);
   renderProbes(sheet);
   renderClaims(sheet);
+  renderDiagrams(sheet);
   stackMargin(sheet);
   headersBox.innerHTML = Object.entries(FIELDS).map(([field, name]) => {
     const entries = headers.filter((header) => header.field === field).map((header, index) => `<span data-ref="${field}:${index + 1}">${escape(header.text)}</span>`);
@@ -476,7 +482,7 @@ function render() {
 
 function stackMargin(sheet) {
   const edge = window.innerWidth - (document.body.classList.contains("feed-open") ? document.getElementById("feed").offsetWidth : 0);
-  const elements = [...document.querySelectorAll("#comments > .card, #probes > .probe, #claims > .claim, #reactions > .reaction")];
+  const elements = [...document.querySelectorAll("#comments > .card, #probes > .probe, #claims > .claim, #reactions > .reaction, #diagrams > .diagram")];
   for (const element of elements) {
     element.style.translate = "";
     const rect = element.getBoundingClientRect();
@@ -713,6 +719,7 @@ function setComponent(name, on) {
   else disabled.add(name);
   try { localStorage.setItem(DISABLED_KEY, JSON.stringify([...disabled])); } catch {}
   if (!on && name === "reactions") { for (const reaction of reactions) reaction.element?.remove(); reactions = []; }
+  if (!on && name === "diagrams") { for (const diagram of diagrams) diagram.element?.remove(); diagrams = []; }
   if (!on && name === "flags") insights = [];
   if (!on && name === "corrections") { pendingFixes = []; pendingSuggestions = []; }
   if (!on && name === "gauges") { gauges = []; gaugesBox.innerHTML = ""; }
@@ -891,6 +898,7 @@ async function findNotes() {
   rescoreProbes();
   refSpans(editor.value, REF_SPAN).filter((span) => !handledRefs.has(span.text)).forEach(handleRef);
   refreshGauges();
+  findDiagrams();
   if (editor.value !== text) insightsTimer = setTimeout(findInsights, 300);
 }
 
@@ -1166,6 +1174,7 @@ const REF_SPAN = /[^.!?\n@]*(?<![\w.])@(?:"[^"\n]*"|[\w-]+)[^.!?\n]*[.!?]?/g;
 const pendingRefs = [];
 let probes = [], previousValue = "";
 let claims = [];
+let diagrams = [], removedDiagrams = new Set(), mermaidModule = null, diagramRenders = 0;
 let ideas = [], seenIdeas = [];
 const handledRefs = new Set();
 const snapshots = new Map();
@@ -1307,6 +1316,61 @@ document.getElementById("claims").addEventListener("click", (event) => {
   render();
 });
 
+const MERMAID_URL = "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+const DIAGRAM_CSS = `
+  .node rect, .node polygon, .node circle, .node path { fill: none; stroke: none; }
+  .nodeLabel, .label { color: var(--faint); fill: var(--faint); }
+  .edgeLabel, .edgeLabel p, .labelBkg { color: var(--muted); background: var(--surface); font-size: 11px; }
+  .edgeLabel rect { fill: none; }
+  .flowchart-link { stroke: var(--muted); stroke-width: 1px; }
+  .marker, .arrowheadPath { fill: var(--muted); stroke: var(--muted); }
+`;
+
+async function findDiagrams() {
+  if (!isOn("diagrams")) return;
+  const page = currentPage;
+  const limit = editor.value.lastIndexOf("\n", editor.selectionStart - 1) + 1;
+  const result = await post("/diagrams", { text: contentText(), limit, goal: currentGoal() }).catch(() => null);
+  if (!result || page !== currentPage || !isOn("diagrams")) return;
+  diagrams.push(...result.diagrams.filter((diagram) => !removedDiagrams.has(diagram.text) && !diagrams.some((other) => other.text === diagram.text)));
+  render();
+}
+
+function renderDiagrams(sheet) {
+  for (const gone of diagrams.filter((diagram) => !stillThere(diagram))) gone.element?.remove();
+  diagrams = diagrams.filter(stillThere);
+  diagrams.forEach((diagram, index) => {
+    if (!diagram.element) {
+      diagram.element = document.createElement("div");
+      diagram.element.className = "diagram";
+      document.getElementById("diagrams").appendChild(diagram.element);
+      drawDiagram(diagram);
+    }
+    diagram.element.dataset.ref = `diagram:${index + 1}`;
+    diagram.element.dataset.refData = `a flowchart beside "${diagram.text}", ${Math.round(100 * diagram.probability)}% fit: ${diagram.mermaid}`;
+    diagram.element.style.top = `${characterRect(diagram.start).top - sheet.top}px`;
+    diagram.element.dataset.line = characterRect(diagram.end - 1).bottom - sheet.top;
+  });
+}
+
+async function drawDiagram(diagram) {
+  mermaidModule ||= import(MERMAID_URL).then(({ default: mermaid }) => {
+    mermaid.initialize({ startOnLoad: false, theme: "base", fontFamily: "Inter Tight, Arial, sans-serif", themeVariables: { fontSize: "13px" }, themeCSS: DIAGRAM_CSS });
+    return mermaid;
+  });
+  const { svg } = await (await mermaidModule).render(`diagram-${++diagramRenders}`, diagram.mermaid);
+  diagram.element.innerHTML = svg;
+  render();
+}
+
+document.getElementById("diagrams").addEventListener("ref-action", (event) => {
+  const diagram = diagrams.find((other) => other.element.dataset.ref === event.detail.ref);
+  if (!diagram) return;
+  removedDiagrams.add(diagram.text);
+  diagrams = diagrams.filter((other) => other !== diagram);
+  setTimeout(() => diagram.element.remove(), REACTION_FADE_MS);
+});
+
 function renderProbes(sheet) {
   const box = document.getElementById("probes");
   const ring = 2 * Math.PI * 8;
@@ -1328,7 +1392,7 @@ function trackRanges() {
   let suffix = 0;
   while (suffix < before.length - prefix && before[before.length - 1 - suffix] === after[after.length - 1 - suffix]) suffix += 1;
   const removedEnd = before.length - suffix, shift = after.length - before.length;
-  for (const range of [thread?.anchor, ...flashes, ...reactions, ...probes, ...claims, ...pendingRefs].filter(Boolean)) {
+  for (const range of [thread?.anchor, ...flashes, ...reactions, ...probes, ...claims, ...diagrams, ...pendingRefs].filter(Boolean)) {
     if (removedEnd <= range.start) { range.start += shift; range.end += shift; }
     else if (prefix < range.end) range.end = Math.max(range.start, range.end + shift);
   }
@@ -1430,6 +1494,10 @@ const pageParts = {
   flags: { save: () => insights, restore: (saved = []) => { insights = saved.filter(stillThere); } },
   probes: { save: () => probes, restore: (saved = []) => { probes = saved.filter(stillThere); } },
   claims: { save: () => claims, restore: (saved = []) => { claims = saved.filter(stillThere); } },
+  diagrams: {
+    save: () => ({ shown: diagrams.map(({ element, ...diagram }) => diagram), removed: [...removedDiagrams] }),
+    restore: (saved) => { for (const diagram of diagrams) diagram.element?.remove(); diagrams = (saved?.shown || []).filter(stillThere); removedDiagrams = new Set(saved?.removed); },
+  },
   ideas: { save: () => ({ ideas, seen: seenIdeas }), restore: (saved) => { ideas = saved?.ideas || []; seenIdeas = saved?.seen || []; } },
   gauges: {
     save: () => ({ gauges, limit: gaugeLimit, brief: gaugeBrief }),
