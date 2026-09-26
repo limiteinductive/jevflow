@@ -1168,7 +1168,7 @@ async function findMemory() {
 const PAGES_KEY = "jevflow.pages", CURRENT_PAGE_KEY = "jevflow.currentPage", SAVE_MS = 500;
 const savedDot = document.getElementById("saved");
 const pageList = document.getElementById("page-list");
-let currentPage = Date.now().toString(36), saveTimer, lastSaved = "";
+let currentPage = Date.now().toString(36), saveTimer, caretTimer, lastSaved = "";
 
 function readPages() {
   try { return JSON.parse(localStorage.getItem(PAGES_KEY)) || {}; } catch { return {}; }
@@ -1186,7 +1186,7 @@ function savePage() {
   const state = pageState();
   if (state === lastSaved) return;
   const pages = readPages();
-  pages[currentPage] = { title: currentGoal() || editor.value.trim().split(/\s+/).slice(0, 6).join(" ") || "New page", updatedAt: Date.now(), state: JSON.parse(state) };
+  pages[currentPage] = { title: currentGoal() || editor.value.trim().split(/\s+/).slice(0, 6).join(" ") || "New page", updatedAt: Date.now(), state: JSON.parse(state), caret: [editor.selectionStart, editor.selectionEnd] };
   try {
     localStorage.setItem(PAGES_KEY, JSON.stringify(pages));
     localStorage.setItem(CURRENT_PAGE_KEY, currentPage);
@@ -1196,6 +1196,13 @@ function savePage() {
   void savedDot.offsetWidth;
   savedDot.classList.add("landed");
   renderPages(pages);
+}
+
+function saveCaret() {
+  const pages = readPages();
+  if (!pages[currentPage]) return;
+  pages[currentPage].caret = [editor.selectionStart, editor.selectionEnd];
+  try { localStorage.setItem(PAGES_KEY, JSON.stringify(pages)); } catch {}
 }
 
 function renderPages(pages) {
@@ -1214,10 +1221,15 @@ function loadPage(id, state) {
   thread = state.thread;
   notes = []; insights = []; reactions = []; flashes = []; history = []; pendingFixes = []; pendingSuggestions = []; gauges = []; gaugeLimit = null;
   declined.clear();
+  render();
+  const [start, end] = (readPages()[id]?.caret || [state.text.length, state.text.length]).map((offset) => Math.min(offset, state.text.length));
+  editor.focus({ preventScroll: true });
+  editor.setSelectionRange(start, end);
+  const rect = characterRect(Math.max(0, Math.min(start, state.text.length - 1)));
+  if (rect) window.scrollBy(0, rect.top - window.innerHeight / 2);
   lastSaved = "";
   savePage();
-  editor.dispatchEvent(new Event("input"));
-  editor.focus();
+  refreshGauges();
 }
 
 function openNewPage(seedHeaders) {
@@ -1228,14 +1240,11 @@ function restorePage() {
   let stored = null;
   try { stored = localStorage.getItem(CURRENT_PAGE_KEY); } catch {}
   const pages = readPages();
-  if (stored) currentPage = stored;
-  renderPages(pages);
-  if (!pages[stored]) return;
-  editor.value = previousValue = pages[stored].state.text;
-  headers = pages[stored].state.headers;
-  thread = pages[stored].state.thread;
+  const [newest] = Object.keys(pages).sort((first, second) => pages[second].updatedAt - pages[first].updatedAt);
+  const id = pages[stored] ? stored : newest;
+  if (!id) return;
   lastSaved = pageState();
-  if (editor.value.trim()) editor.dispatchEvent(new Event("input"));
+  loadPage(id, pages[id].state);
 }
 
 pageList.addEventListener("click", (event) => {
@@ -1244,6 +1253,11 @@ pageList.addEventListener("click", (event) => {
   if (page) loadPage(id, page.state);
 });
 document.getElementById("new-page").addEventListener("click", () => openNewPage([]));
+document.addEventListener("selectionchange", () => {
+  if (document.activeElement !== editor) return;
+  clearTimeout(caretTimer);
+  caretTimer = setTimeout(saveCaret, SAVE_MS);
+});
 document.getElementById("pages-toggle").addEventListener("click", () => { document.body.classList.toggle("pages-open"); setTimeout(render, 360); });
 if (window.innerWidth > 1100) document.body.classList.add("pages-open");
 
