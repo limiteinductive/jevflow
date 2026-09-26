@@ -299,39 +299,44 @@
   #page-list li:hover { color: var(--ink); }
   #page-list li.current { background: none; color: var(--ink); font-weight: 600; }
   #saved { border-radius: 0; background: var(--ok); }
-  #components-panel { margin: auto 0 16px; border: var(--rule); }
-  #components-panel h3 { margin: 0; padding: 2px 8px; background: var(--bar-bg); color: var(--bar-text); font: 400 11px/1.6 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; }
+  #components-panel { margin: auto 0 16px; }
+  #components-panel h3 { display: flex; justify-content: space-between; margin: 0 0 4px; padding: 4px 8px; border-bottom: 1px solid var(--muted); color: var(--soft); font: 400 11px/1.6 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer; }
+  #components-panel h3::after { content: "-"; }
+  #components-panel.collapsed h3 { margin-bottom: 0; }
+  #components-panel.collapsed h3::after { content: "+"; }
+  #components-panel.collapsed #component-list { display: none; }
   #component-list { margin: 0; padding: 0; list-style: none; }
-  #component-list li { display: flex; align-items: center; gap: 8px; padding: 4px 8px; font: 12px/1.4 var(--mono); color: var(--ink); }
-  #component-list li + li { border-top: 1px solid var(--muted); }
-  #component-list li::before { content: ""; flex: none; width: 10px; height: 10px; box-sizing: border-box; border: 2px solid var(--line); background: var(--accent); }
+  #component-list li { display: flex; align-items: center; gap: 8px; padding: 3px 8px; font: 12px/1.4 var(--mono); color: var(--ink); }
+  #component-list li::before { content: ""; flex: none; width: 8px; height: 8px; box-sizing: border-box; border: 1px solid var(--ink); background: var(--accent); }
   #component-list li.off { color: var(--muted); }
   #component-list li.off::before { border-color: var(--muted); background: none; }
-  #component-list li.toggled { animation: toggled 1.2s ease-out; }
-  @keyframes toggled { from { background: var(--accent); color: #1E1E1E; } }
+  #components-panel .marked { background: rgba(var(--style), 0.3); }
+  #components-panel .toggled { animation: toggled 1.2s ease-out; }
+  @keyframes toggled { from { background: rgba(var(--style), 0.3); } }
+  .outlined { outline: 1px solid var(--accent); outline-offset: -1px; }
   .meta { color: var(--faint); background: none; }
 </style>
 </head>
 <body>
 <div class="page">
-  <div id="headers"></div>
+  <div id="headers" data-ref="component:notes" data-ref-data="the header lines: the goal, audience, tone and to do notes lifted from the draft"></div>
   <div id="gauges" data-ref="component:gauges" data-ref-data="the Impact box: rings scoring the draft on what matters for your Goal"></div>
   <div id="memory" data-ref="component:memory" data-ref-data="the memory box: facts jevflow knows about you"></div>
   <div class="sheet">
     <div id="backdrop" class="layer" aria-hidden="true"></div>
     <textarea id="editor" class="layer" spellcheck="false" autofocus placeholder="just write. tell me what it's for as you go."></textarea>
     <div id="asks"></div>
-    <div id="comments"></div>
-    <div id="reactions"></div>
-    <div id="probes"></div>
-    <div id="claims"></div>
+    <div id="comments" data-ref="component:replies" data-ref-data="the margin comment: the coworker's reply to your question"></div>
+    <div id="reactions" data-ref="component:reactions" data-ref-data="the emoji reactions beside lines that land"></div>
+    <div id="probes" data-ref="component:probes" data-ref-data="the rings answering your yes/no questions about copied text"></div>
+    <div id="claims" data-ref="component:claims" data-ref-data="the rings on claims that read as false, with a one-click fix"></div>
   </div>
 </div>
 <button id="feed-toggle" tabindex="-1" title="Decisions (Cmd+J)" aria-label="Decisions"><svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="7" width="2.4" height="6"/><rect x="5.8" y="2" width="2.4" height="11"/><rect x="10.6" y="5" width="2.4" height="8"/></svg></button>
 <i id="saved" aria-hidden="true"></i>
 <button id="pages-toggle" tabindex="-1" title="Pages" aria-label="Pages">≡</button>
 <nav id="pages" aria-label="Pages"><button id="new-page" tabindex="-1" title="New page" aria-label="New page">new page</button><ul id="page-list"></ul><section id="components-panel" aria-label="Components"><h3>components</h3><ul id="component-list"></ul></section></nav>
-<aside id="feed" aria-label="Decisions">
+<aside id="feed" aria-label="Decisions" data-ref="component:feed" data-ref-data="the decisions column: every decision, live">
   <div class="feed-totals">
     <div><b><span id="feed-decisions">0</span><small id="feed-replays"></small></b>decisions</div>
     <div><b id="feed-median">0.00s</b>median call</div>
@@ -1219,7 +1224,7 @@ editor.addEventListener("copy", (event) => {
 
 document.addEventListener("click", (event) => {
   const element = event.target.closest("[data-ref]");
-  if (!element) return;
+  if (!element || event.target.closest("button")) return;
   const token = refToken(element);
   const data = Object.entries(element.dataset).filter(([key]) => key !== "ref").map(([key, value]) => `${key}: ${value}`);
   snapshots.set(token, { ref: element.dataset.ref, component: [...data, element.innerText.replace(/\s+/g, " ").trim()].join("; ") });
@@ -1381,20 +1386,52 @@ document.addEventListener("selectionchange", () => {
 document.getElementById("pages-toggle").addEventListener("click", () => { document.body.classList.toggle("pages-open"); setTimeout(render, 360); });
 if (window.innerWidth > 1100) document.body.classList.add("pages-open");
 
+const COLLAPSED_KEY = "jevflow.componentsCollapsed";
+const componentsPanel = document.getElementById("components-panel");
+const componentsHeader = componentsPanel.querySelector("h3");
 const componentList = document.getElementById("component-list");
+let markedRow = null, outlinedFrames = [];
+try { componentsPanel.classList.toggle("collapsed", localStorage.getItem(COLLAPSED_KEY) === "true"); } catch {}
 
 function renderComponents() {
   componentList.innerHTML = Object.entries(components).map(([name, does]) => `<li data-ref="component:${attribute(name)}" data-ref-data="${attribute(does)}" class="${isOn(name) ? "" : "off"}" title="${attribute(does)}">${escape(name)}</li>`).join("");
 }
 
+function componentMark(name) {
+  if (componentsPanel.classList.contains("collapsed")) return componentsHeader;
+  return componentList.querySelector(`[data-ref="component:${CSS.escape(name)}"]`);
+}
+
+function outlineComponent(name) {
+  for (const frame of outlinedFrames) frame.classList.remove("outlined");
+  const frames = name ? [...document.querySelectorAll(`[data-ref="component:${CSS.escape(name)}"]`)].filter((frame) => !componentList.contains(frame)) : [];
+  outlinedFrames = frames.flatMap((frame) => frame.offsetHeight ? [frame] : [...frame.children]);
+  for (const frame of outlinedFrames) frame.classList.add("outlined");
+}
+
+componentsHeader.addEventListener("click", () => {
+  const collapsed = componentsPanel.classList.toggle("collapsed");
+  try { localStorage.setItem(COLLAPSED_KEY, collapsed); } catch {}
+});
 componentList.addEventListener("click", (event) => {
-  const name = event.target.closest("[data-ref]")?.dataset.ref.slice("component:".length);
+  const name = event.target.closest("[data-ref]")?.dataset.ref.split(":")[1];
   if (name) setComponent(name, !isOn(name));
+});
+componentList.addEventListener("mouseover", (event) => outlineComponent(event.target.closest("[data-ref]")?.dataset.ref.split(":")[1]));
+componentList.addEventListener("mouseleave", () => outlineComponent(null));
+document.addEventListener("mouseover", (event) => {
+  const frame = componentsPanel.contains(event.target) ? null : event.target.closest('[data-ref^="component:"]');
+  markedRow?.classList.remove("marked");
+  markedRow = frame && componentMark(frame.dataset.ref.split(":")[1]);
+  markedRow?.classList.add("marked");
 });
 window.addEventListener("components-loaded", renderComponents);
 window.addEventListener("component-toggle", (event) => {
   renderComponents();
-  componentList.querySelector(`[data-ref="component:${CSS.escape(event.detail.name)}"]`)?.classList.add("toggled");
+  const mark = componentMark(event.detail.name);
+  mark?.classList.remove("toggled");
+  void mark?.offsetWidth;
+  mark?.classList.add("toggled");
 });
 
 restorePage();
